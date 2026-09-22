@@ -4,9 +4,15 @@
     "@fastly/js-compute": "^3.46.0"
   },
   "scripts": {
+    "secrets": "node scripts/gen-secrets.mjs",
+    "pretest": "npm run secrets",
+    "test": "mocha",
+    "preserve": "npm run secrets",
+    "serve": "aio aem edge-functions serve",
+    "prebuild": "npm run secrets",
     "build": "aio aem edge-functions build",
-    "deploy": "aio aem edge-functions deploy",
-    "test": "mocha"
+    "predeploy": "npm run secrets",
+    "deploy": "aio aem edge-functions deploy api-poc"
   },
   "devDependencies": {
     "mocha": "12.0.0-beta-9.2"

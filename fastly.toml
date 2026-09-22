@@ -11,20 +11,14 @@ service_id = ""
 
 [scripts]
   post_init = "npm install"
+  # Overrides the Fastly CLI's default JavaScript build
+  # ("npm exec js-compute-runtime ./src/index.js ./bin/main.wasm") so that the TMDB token
+  # is regenerated into src/generated/secrets.js on every build. `aio aem edge-functions`
+  # serve/build/deploy all shell out to `fastly compute build`, so this hook covers all
+  # three even when they are invoked directly rather than through npm.
+  build = "node scripts/gen-secrets.mjs && npm exec js-compute-runtime ./src/index.js ./bin/main.wasm"
 
 [local_server]
   [local_server.backends]
     [local_server.backends.open-meteo]
       url = "https://api.open-meteo.com"
-
-  [local_server.config_stores]
-    [local_server.config_stores.config_default]
-      format = "inline-toml"
-    [local_server.config_stores.config_default.contents]
-      LOG_LEVEL = "debug"
-
-  [local_server.secret_stores]
-    [[local_server.secret_stores.secret_default]]
-      key = "API_TOKEN"
-      data = "helloworld"
-

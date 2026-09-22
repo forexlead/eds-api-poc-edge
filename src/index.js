@@ -12,37 +12,64 @@ governing permissions and limitations under the License.
 
 /// <reference types="@fastly/js-compute" />
 
-import * as response from './lib/response.js';
-import { log } from './lib/log.js';
-import { weatherHandler } from "./weather.js";
+import { env } from 'fastly:env';
+import { error, preflight } from './lib/http.js';
+import { healthHandler } from './routes/health.js';
 
-addEventListener("fetch", (event) => event.respondWith(handleRequest(event)));
+// `addEventListener` only exists on Compute; guarding it lets mocha import this router.
+if (typeof addEventListener === 'function') {
+  addEventListener('fetch', (event) => event.respondWith(handleRequest(event)));
+}
 
+/** GET-only route table. Every handler takes (request, ctx). */
+const ROUTES = {
+  '/api/health': healthHandler
+};
+
+function popName() {
+  try {
+    return env('FASTLY_POP') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {{ request: Request, client?: { geo?: object } }} event
+ */
 async function handleRequest(event) {
   const req = event.request;
   const url = new URL(req.url);
-
-  let finalResponse;
+  const path = url.pathname;
 
   try {
-    // Route matching
-    if (url.pathname === "/" && req.method === "GET") {
-      finalResponse = new Response("Hello World from the edge!", { status: 200 });
-    } else if (url.pathname === "/hello-world" && req.method === "GET") {
-      finalResponse = new Response("Hello World from the edge!", { status: 200 });
-    } else if (url.pathname === "/weather" && req.method === "GET") {
-      finalResponse = await weatherHandler(req, event.client);
-    } else {
-      finalResponse = response.notFound();
+    if (path.startsWith('/api/')) {
+      if (req.method === 'OPTIONS') {
+        return preflight(req);
+      }
+      const handler = ROUTES[path];
+      if (!handler) {
+        return error(req, 404, 'NOT_FOUND', `No such route: ${path}`);
+      }
+      if (req.method !== 'GET') {
+        return error(req, 405, 'BAD_REQUEST', `${req.method} is not allowed on ${path}`, {
+          Allow: 'GET, OPTIONS'
+        });
+      }
+      return await handler(req, { pop: popName(), geo: event.client?.geo ?? null });
     }
+
+    // Boilerplate smoke-test route kept for post-deploy verification (see config/cdn.yaml).
+    if ((path === '/' || path === '/hello-world') && req.method === 'GET') {
+      return new Response('Hello World from the edge!', { status: 200 });
+    }
+
+    return new Response('Not Found!', { status: 404 });
   } catch (err) {
-    console.log(err);
-    finalResponse = response.error();
+    // Log the message only — an upstream error's cause can embed a credentialed URL.
+    console.error(`handleRequest failed for ${path}: ${err?.message ?? 'unknown error'}`);
+    return error(req, 500, 'UPSTREAM', 'Internal error');
   }
-
-  // Log the request and response
-  log(req, finalResponse);
-
-  return finalResponse;
 }
 
+export { handleRequest, ROUTES };

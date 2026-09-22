@@ -148,3 +148,6 @@ dist
 /node_modules
 /bin
 /pkg
+
+# generated at build time from .env (never commit — contains the TMDB token)
+/src/generated/
