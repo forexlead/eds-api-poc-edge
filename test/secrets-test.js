@@ -61,6 +61,40 @@ describe('TMDB token containment', function () {
     );
   });
 
+  it('exists in the source tree only in src/generated/secrets.js', function () {
+    // .env is the source of truth for the token (excluded here on purpose); bin/ and pkg/
+    // are build artifacts that necessarily embed it once compiled and are gitignored.
+    const secret = token();
+    const root = new URL('..', import.meta.url).pathname;
+    let output = '';
+    try {
+      output = execFileSync(
+        'grep',
+        [
+          '-rlF',
+          '--exclude-dir=node_modules',
+          '--exclude-dir=.git',
+          '--exclude-dir=bin',
+          '--exclude-dir=pkg',
+          '--exclude-dir=.aio',
+          '--exclude=.env',
+          '--',
+          secret,
+          '.'
+        ],
+        { cwd: root, encoding: 'utf8' }
+      );
+    } catch (err) {
+      if (err.status !== 1) throw err; // grep exits 1 for "no matches", which is fine here
+    }
+    const matches = output
+      .split('\n')
+      .filter(Boolean)
+      .map((f) => f.replace(/^\.\//, ''))
+      .sort();
+    assert.deepEqual(matches, ['src/generated/secrets.js']);
+  });
+
   it('gen-secrets fails loudly when TMDB_TOKEN is missing', function () {
     // The generator resolves .env relative to its own location, so a copy in a temp
     // directory with an empty .env exercises the failure path without touching the repo.

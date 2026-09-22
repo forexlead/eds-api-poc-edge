@@ -15,6 +15,7 @@ governing permissions and limitations under the License.
 import { env } from 'fastly:env';
 import { error, preflight } from './lib/http.js';
 import { healthHandler } from './routes/health.js';
+import { moviesHandler, movieHandler } from './routes/movies.js';
 
 // `addEventListener` only exists on Compute; guarding it lets mocha import this router.
 if (typeof addEventListener === 'function') {
@@ -23,7 +24,9 @@ if (typeof addEventListener === 'function') {
 
 /** GET-only route table. Every handler takes (request, ctx). */
 const ROUTES = {
-  '/api/health': healthHandler
+  '/api/health': healthHandler,
+  '/api/movies': moviesHandler,
+  '/api/movie': movieHandler
 };
 
 function popName() {
