@@ -3,23 +3,9 @@ version: '1'
 metadata:
   envTypes: ["stage"]
 data:
-  requestTransformations:
-    rules:
-      # Boilerplate: /weather varies by client IP, so fold the IP into the cache key.
-      - name: add-client-ip-to-weather
-        when: { reqProperty: path, equals: "/weather" }
-        actions:
-          - type: set
-            queryParam: ip
-            value: { reqProperty: clientIp }
   originSelectors:
     rules:
-      # Boilerplate smoke-test routes
-      - name: route-weather-to-edge-function
-        when: { reqProperty: path, equals: "/weather" }
-        action:
-          type: selectAemOrigin
-          originName: edgefunction-api-poc
+      # Boilerplate smoke-test route
       - name: route-hello-world-to-edge-function
         when: { reqProperty: path, equals: "/hello-world" }
         action:
