@@ -16,6 +16,8 @@ import { env } from 'fastly:env';
 import { error, preflight } from './lib/http.js';
 import { healthHandler } from './routes/health.js';
 import { moviesHandler, movieHandler } from './routes/movies.js';
+import { dashboardHandler } from './routes/dashboard.js';
+import { liteHandler } from './routes/lite.js';
 
 // `addEventListener` only exists on Compute; guarding it lets mocha import this router.
 if (typeof addEventListener === 'function') {
@@ -26,7 +28,9 @@ if (typeof addEventListener === 'function') {
 const ROUTES = {
   '/api/health': healthHandler,
   '/api/movies': moviesHandler,
-  '/api/movie': movieHandler
+  '/api/movie': movieHandler,
+  '/api/dashboard': dashboardHandler,
+  '/api/lite': liteHandler
 };
 
 function popName() {

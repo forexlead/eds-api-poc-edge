@@ -24,3 +24,5 @@ service_id = ""
       url = "https://api.open-meteo.com"
     [local_server.backends.tmdb]
       url = "https://api.themoviedb.org"
+    [local_server.backends.pokeapi]
+      url = "https://pokeapi.co"
