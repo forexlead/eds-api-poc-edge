@@ -2,7 +2,7 @@ kind: "EdgeFunctions"
 version: "1"
 data:
   functions:
-    - name: my-edge-function
+    - name: api-poc
   # Uncomment to enable secrets
   # secrets:
   #   - key: API_TOKEN

@@ -3,10 +3,7 @@ version: '1'
 data:
   requestTransformations:
     rules:
-      # The /weather response depends on the caller's IP-based geolocation, so the same
-      # URL would otherwise return different content per visitor. Fold the client IP into
-      # the cache key (as an `ip` query parameter) so each client gets its own cache entry
-      # instead of opting out of caching. This runs before the CDN cache lookup.
+      # Boilerplate: /weather varies by client IP, so fold the IP into the cache key.
       - name: add-client-ip-to-weather
         when: { reqProperty: path, equals: "/weather" }
         actions:
@@ -15,13 +12,27 @@ data:
             value: { reqProperty: clientIp }
   originSelectors:
     rules:
+      # Boilerplate smoke-test routes
       - name: route-weather-to-edge-function
         when: { reqProperty: path, equals: "/weather" }
         action:
           type: selectAemOrigin
-          originName: edgefunction-my-edge-function
+          originName: edgefunction-api-poc
       - name: route-hello-world-to-edge-function
         when: { reqProperty: path, equals: "/hello-world" }
         action:
           type: selectAemOrigin
-          originName: edgefunction-my-edge-function
+          originName: edgefunction-api-poc
+      # POC: must always reach the function (no CDN cache)
+      - name: route-api-uncached
+        when: { reqProperty: path, matches: "^/api/(health|resilient)$" }
+        action:
+          type: selectAemOrigin
+          originName: edgefunction-api-poc
+          skipCache: true
+      # POC: CDN-cacheable (Surrogate-Control + Surrogate-Key set by the function)
+      - name: route-api-cached
+        when: { reqProperty: path, matches: "^/api/(movies|movie|dashboard|lite)$" }
+        action:
+          type: selectAemOrigin
+          originName: edgefunction-api-poc
