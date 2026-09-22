@@ -17,8 +17,8 @@ Base URL
 | `Timing-Allow-Origin` | `*` (lets the browser Resource Timing API report sizes/timings cross-origin) |
 | `Vary` | `Origin` |
 | `X-Pattern` | `proxy` \| `aggregate` \| `transform` \| `failover` \| `health` |
-| `X-Fetched-At` | cacheable routes: the upstream response's own `Date` header (preserved in the fetch cache, so an old value = served from cache; a new value after purge = refetched) |
-| `X-Backend-Age` | cacheable routes: passthrough of the upstream response's own `Age` header, when present; omitted when the backend didn't send one. A supplementary signal only — many backends (TMDB included) don't set `Age` on every response, so its absence doesn't mean "not cached". |
+| `X-Fetched-At` | **single-upstream routes only** (`movies`, `movie`, `lite`): the upstream response's own `Date` header (preserved in the fetch cache, so an old value = served from cache; a new value after purge = refetched). `dashboard` omits it by design — see below. |
+| `X-Backend-Age` | **single-upstream routes only** (`movies`, `movie`, `lite`): passthrough of the upstream response's own `Age` header, when present; omitted when the backend didn't send one. A supplementary signal only — many backends (TMDB included) don't set `Age` on every response, so its absence doesn't mean "not cached". `dashboard` omits it by design — see below. |
 | `Server-Timing` | one entry per backend call, e.g. `tmdb;dur=142, weather;dur=88, edge;dur=151` — **this is the primary cache-hit signal**: on a Fastly fetch-cache hit the backend call returns from the local cache in well under a few ms, vs. ~70ms+ for a live round trip to TMDB. `X-Fetched-At`/`X-Backend-Age` corroborate but `tmdb;dur` is what to check first. |
 | `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge — we measure the edge, not the browser cache) |
 | `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (honoured by the Adobe CDN in front of the stage environment) |
@@ -78,7 +78,11 @@ Backends in parallel (`Promise.allSettled`):
   }
 }
 ```
+On success, `sources.pokemon.data` = `{ "id": 25, "name": "pikachu", "sprite": "https://raw.githubusercontent.com/.../25.png" }` (the example above shows the `error` shape instead, since that's the more interesting case to document).
+
 One failed source never fails the whole response (status 200). `Surrogate-Key: dashboard`. Max 3 backend fetches (limit is 32).
+
+No `X-Fetched-At`/`X-Backend-Age` on this route, by design: those headers describe a single upstream response, and an aggregate of three backends doesn't have one. Each source's own `ms` in `Server-Timing` is the cache signal here instead — near-0ms on a fetch-cache hit, same as the single-upstream routes.
 
 ## `GET /api/lite?id=<1-1025>` — Pattern 03 Transformer
 Backend: PokeAPI `GET /api/v2/pokemon/<id>` (~200–400 KB raw).
@@ -87,7 +91,7 @@ Backend: PokeAPI `GET /api/v2/pokemon/<id>` (~200–400 KB raw).
   "sprite": "https://raw.githubusercontent.com/.../25.png",
   "stats": { "hp": 35, "attack": 55, "defense": 40, "speed": 90 } }
 ```
-Headers `X-Original-Bytes` (raw upstream body length) and `X-Transformed-Bytes`. `Surrogate-Key: pokemon pokemon-<id>`.
+Headers `X-Original-Bytes` (raw upstream body length) and `X-Transformed-Bytes`. `Surrogate-Key: pokemon pokemon-<id>`. `Server-Timing`'s backend entry is named `pokemon;dur=…` (e.g. `pokemon;dur=142, edge;dur=151`). A single upstream response exists here (unlike `dashboard`), so `X-Fetched-At`/`X-Backend-Age` apply per the common rules above.
 
 ## `GET /api/resilient?mode=ok|fail|slow` — Pattern 04 Failover
 Backend: TMDB `/3/movie/603`. `mode=fail` → call a guaranteed-500 URL (`https://httpbin.org/status/500`) instead; `mode=slow` → `https://httpbin.org/delay/5` (hits the 1500 ms timeout).
