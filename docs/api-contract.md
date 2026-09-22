@@ -13,12 +13,13 @@ Base URL
 |---|---|
 | `Content-Type` | `application/json; charset=utf-8` |
 | `Access-Control-Allow-Origin` | echo request `Origin` if it matches `^https://[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.(page\|live)$` or `http://localhost:3000`; otherwise omit |
-| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, Age` |
+| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, Age` |
 | `Timing-Allow-Origin` | `*` (lets the browser Resource Timing API report sizes/timings cross-origin) |
 | `Vary` | `Origin` |
 | `X-Pattern` | `proxy` \| `aggregate` \| `transform` \| `failover` \| `health` |
 | `X-Fetched-At` | cacheable routes: the upstream response's own `Date` header (preserved in the fetch cache, so an old value = served from cache; a new value after purge = refetched) |
-| `Server-Timing` | one entry per backend call, e.g. `tmdb;dur=142, weather;dur=88, edge;dur=151` |
+| `X-Backend-Age` | cacheable routes: passthrough of the upstream response's own `Age` header, when present; omitted when the backend didn't send one. A supplementary signal only — many backends (TMDB included) don't set `Age` on every response, so its absence doesn't mean "not cached". |
+| `Server-Timing` | one entry per backend call, e.g. `tmdb;dur=142, weather;dur=88, edge;dur=151` — **this is the primary cache-hit signal**: on a Fastly fetch-cache hit the backend call returns from the local cache in well under a few ms, vs. ~70ms+ for a live round trip to TMDB. `X-Fetched-At`/`X-Backend-Age` corroborate but `tmdb;dur` is what to check first. |
 | `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge — we measure the edge, not the browser cache) |
 | `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (honoured by the Adobe CDN in front of the stage environment) |
 | `Surrogate-Key` | as listed per route |
@@ -49,7 +50,7 @@ Backend: TMDB `GET https://api.themoviedb.org/3/search/movie?query=<q>` with `Au
   ]
 }
 ```
-Max 10 results. `Surrogate-Key: movies movies-q-<slug(q)>`.
+Max 10 results. `Surrogate-Key: movies movies-q-<slug(q)>`. `X-Backend-Age` passes through TMDB's own `Age` header when TMDB sent one.
 
 ## `GET /api/movie?id=<tmdbId>` — single item (purge demo)
 Backend: TMDB `GET /3/movie/<id>`.
@@ -57,7 +58,7 @@ Backend: TMDB `GET /3/movie/<id>`.
 { "pattern": "proxy", "id": 603, "title": "The Matrix", "year": 1999, "rating": 8.2,
   "runtime": 136, "overview": "...", "poster": "...", "fetchedAt": "Mon, 21 Sep 2026 18:00:00 GMT" }
 ```
-`Surrogate-Key: movies movie-<id>`. `fetchedAt` = upstream `Date` header (same as `X-Fetched-At`) → old value means served from the fetch cache; after `purge-cache -k movie-603` it jumps to now, while `movie-550` keeps its old value.
+`Surrogate-Key: movies movie-<id>`. `fetchedAt` = upstream `Date` header (same as `X-Fetched-At`) → old value means served from the fetch cache; after `purge-cache -k movie-603` it jumps to now, while `movie-550` keeps its old value. `X-Backend-Age` passes through TMDB's own `Age` header when present. Neither is as reliable as `Server-Timing`'s `tmdb;dur` (near-0ms on a fetch-cache hit vs. a live round trip) — treat that as the primary cache-hit signal and the headers as corroboration.
 
 ## `GET /api/dashboard?lat=<n>&lon=<n>` — Pattern 02 Aggregator
 lat/lon optional → default to `event.client.geo`, then to Cary NC (35.79, -78.78).

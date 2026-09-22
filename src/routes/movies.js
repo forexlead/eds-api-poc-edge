@@ -51,6 +51,16 @@ function ratingOf(voteAverage) {
   return typeof voteAverage === 'number' ? Math.round(voteAverage * 10) / 10 : null;
 }
 
+/**
+ * Passthrough of the upstream `Age` header as `X-Backend-Age` — a supplementary cache-hit
+ * signal alongside `X-Fetched-At`. Omitted (not an empty string) when TMDB didn't send one,
+ * since `Age` isn't set on every TMDB response even when the request was cached.
+ */
+function backendAgeHeader(response) {
+  const age = response.headers.get('age');
+  return age !== null ? { 'X-Backend-Age': age } : {};
+}
+
 function toSummary(item) {
   return {
     id: item.id,
@@ -103,6 +113,7 @@ async function moviesHandler(req) {
       headers: {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
+        ...backendAgeHeader(response),
         'Surrogate-Control': SURROGATE_CONTROL,
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
@@ -157,6 +168,7 @@ async function movieHandler(req) {
       headers: {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
+        ...backendAgeHeader(response),
         'Surrogate-Control': SURROGATE_CONTROL,
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
@@ -165,4 +177,4 @@ async function movieHandler(req) {
   );
 }
 
-export { moviesHandler, movieHandler, slug, posterUrl, yearOf, ratingOf, toSummary };
+export { moviesHandler, movieHandler, slug, posterUrl, yearOf, ratingOf, toSummary, backendAgeHeader };

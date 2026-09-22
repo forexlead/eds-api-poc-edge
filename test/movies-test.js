@@ -26,11 +26,10 @@ function fetchEvent(path) {
   return { request: new Request(BASE + path), client: {} };
 }
 
-function tmdbResponse(body, { status = 200, date = UPSTREAM_DATE } = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', Date: date }
-  });
+function tmdbResponse(body, { status = 200, date = UPSTREAM_DATE, age } = {}) {
+  const headers = { 'Content-Type': 'application/json', Date: date };
+  if (age !== undefined) headers.Age = String(age);
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
 const MATRIX_SEARCH_HIT = {
@@ -97,12 +96,19 @@ describe('GET /api/movies?q=', function () {
 
     assert.equal(resp.headers.get('X-Pattern'), 'proxy');
     assert.equal(resp.headers.get('X-Fetched-At'), UPSTREAM_DATE);
+    assert.equal(resp.headers.get('X-Backend-Age'), null); // TMDB sent no Age header here
     assert.equal(resp.headers.get('Surrogate-Key'), 'movies movies-q-matrix');
     assert.equal(
       resp.headers.get('Surrogate-Control'),
       'max-age=60, stale-while-revalidate=300, stale-if-error=86400'
     );
     assert.match(resp.headers.get('Server-Timing'), /^tmdb;dur=\d+, edge;dur=\d+$/);
+  });
+
+  it('passes through TMDB\'s Age header as X-Backend-Age when present', async function () {
+    globalThis.fetch = async () => tmdbResponse({ results: [MATRIX_SEARCH_HIT] }, { age: 42 });
+    const resp = await handleRequest(fetchEvent('/api/movies?q=matrix'));
+    assert.equal(resp.headers.get('X-Backend-Age'), '42');
   });
 
   it('caps results at 10', async function () {
@@ -184,7 +190,14 @@ describe('GET /api/movie?id=', function () {
     });
 
     assert.equal(resp.headers.get('X-Fetched-At'), UPSTREAM_DATE);
+    assert.equal(resp.headers.get('X-Backend-Age'), null); // TMDB sent no Age header here
     assert.equal(resp.headers.get('Surrogate-Key'), 'movies movie-603');
+  });
+
+  it('passes through TMDB\'s Age header as X-Backend-Age when present', async function () {
+    globalThis.fetch = async () => tmdbResponse(MATRIX_DETAIL, { age: 7 });
+    const resp = await handleRequest(fetchEvent('/api/movie?id=603'));
+    assert.equal(resp.headers.get('X-Backend-Age'), '7');
   });
 
   it('400s a missing or non-numeric id', async function () {
@@ -213,6 +226,38 @@ describe('GET /api/movie?id=', function () {
     assert.equal(resp.status, 502);
     const body = await resp.json();
     assert.equal(body.error.code, 'UPSTREAM');
+  });
+});
+
+describe('Server-Timing as the primary cache-hit signal', function () {
+  // docs/api-contract.md: X-Fetched-At and X-Backend-Age are corroborating signals, but
+  // tmdb;dur is the one to check first — a Fastly fetch-cache hit returns near-instantly,
+  // a live round trip to TMDB does not. This simulates that gap without a real network call.
+  let originalFetch;
+
+  beforeEach(function () {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(function () {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('reports a near-0ms tmdb;dur on a fast (cache-hit-like) response', async function () {
+    globalThis.fetch = async () => tmdbResponse(MATRIX_DETAIL);
+    const resp = await handleRequest(fetchEvent('/api/movie?id=603'));
+    const [, tmdbMs] = resp.headers.get('Server-Timing').match(/tmdb;dur=(\d+)/);
+    assert.ok(Number(tmdbMs) < 20, `expected a near-0ms tmdb;dur, got ${tmdbMs}ms`);
+  });
+
+  it('reports the real elapsed time on a slow (live round-trip-like) response', async function () {
+    globalThis.fetch = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return tmdbResponse(MATRIX_DETAIL);
+    };
+    const resp = await handleRequest(fetchEvent('/api/movie?id=603'));
+    const [, tmdbMs] = resp.headers.get('Server-Timing').match(/tmdb;dur=(\d+)/);
+    assert.ok(Number(tmdbMs) >= 55, `expected tmdb;dur to reflect the ~60ms delay, got ${tmdbMs}ms`);
   });
 });
 

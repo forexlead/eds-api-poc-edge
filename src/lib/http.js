@@ -20,7 +20,7 @@ const ALLOWED_ORIGIN_RE = /^https:\/\/[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.
 const ALLOWED_ORIGIN_LITERAL = 'http://localhost:3000';
 
 const EXPOSE_HEADERS =
-  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, Age';
+  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, Age';
 
 /** The browser always revalidates against the edge — we measure the edge, not the browser cache. */
 const BROWSER_CACHE_CONTROL = 'public, max-age=0, must-revalidate';

@@ -51,7 +51,7 @@ describe('GET /api/health', function () {
     assert.equal(resp.headers.get('Timing-Allow-Origin'), '*');
     assert.equal(resp.headers.get('Vary'), 'Origin');
     const exposed = resp.headers.get('Access-Control-Expose-Headers');
-    for (const name of ['Server-Timing', 'X-Pattern', 'X-Fetched-At', 'Age']) {
+    for (const name of ['Server-Timing', 'X-Pattern', 'X-Fetched-At', 'X-Backend-Age', 'Age']) {
       assert.ok(exposed.includes(name), `${name} should be exposed`);
     }
   });
