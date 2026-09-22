@@ -1,5 +1,7 @@
 kind: "EdgeFunctions"
 version: "1"
+metadata:
+  envTypes: ["stage"]
 data:
   functions:
     - name: api-poc

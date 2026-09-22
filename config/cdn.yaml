@@ -1,5 +1,7 @@
 kind: 'CDN'
 version: '1'
+metadata:
+  envTypes: ["stage"]
 data:
   requestTransformations:
     rules:
