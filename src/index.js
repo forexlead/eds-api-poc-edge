@@ -18,6 +18,7 @@ import { healthHandler } from './routes/health.js';
 import { moviesHandler, movieHandler } from './routes/movies.js';
 import { dashboardHandler } from './routes/dashboard.js';
 import { liteHandler } from './routes/lite.js';
+import { resilientHandler } from './routes/resilient.js';
 
 // `addEventListener` only exists on Compute; guarding it lets mocha import this router.
 if (typeof addEventListener === 'function') {
@@ -30,7 +31,8 @@ const ROUTES = {
   '/api/movies': moviesHandler,
   '/api/movie': movieHandler,
   '/api/dashboard': dashboardHandler,
-  '/api/lite': liteHandler
+  '/api/lite': liteHandler,
+  '/api/resilient': resilientHandler
 };
 
 function popName() {

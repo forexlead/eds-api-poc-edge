@@ -109,4 +109,5 @@ Fallback: live → static snapshot bundled in the function (`src/fallback/movie-
 { "pattern": "failover", "served": "live|static", "reason": null,
   "data": { "id": 603, "title": "The Matrix", "year": 1999 } }
 ```
-`reason` = `"upstream 500"` or `"timeout"` when static. Always `200`. Header `X-Fallback: none|static`. Not cached.
+`reason` = `"upstream 500"` or `"timeout"` when static (`"upstream"` for a network error). Always `200`. Header `X-Fallback: none|static`. Not cached: the backend fetch uses `CacheOverride("pass")`, no `Surrogate-Control`/`Surrogate-Key`, and cdn.yaml routes it with `skipCache`.
+`mode` absent = `ok`; any other value → `400 BAD_REQUEST`. `Server-Timing`: `upstream;dur=…, edge;dur=…` (≈1500 on `slow`). The TMDB token is attached only to the TMDB call, never to the httpbin URLs.
