@@ -18,15 +18,12 @@ governing permissions and limitations under the License.
 // Authorization header. It must never reach a response body, a response header, or a
 // console.log line.
 
-import { CacheOverride } from 'fastly:cache-override';
 import { TMDB_TOKEN } from '../generated/secrets.js';
-import { error, json, serverTiming, timedFetch } from '../lib/http.js';
+import { fetchCacheOverride } from '../lib/cache.js';
+import { cacheHeaders, error, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const MAX_RESULTS = 10;
-
-/** Cacheable routes only (docs/api-contract.md "Common response rules"). */
-const SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
 
 /** `<slug(q)>` for the `movies-q-<slug(q)>` surrogate key. */
 function slug(text) {
@@ -72,10 +69,10 @@ function toSummary(item) {
 }
 
 /** Fetch a TMDB path with the shared auth header and fetch-cache settings. */
-async function fetchTmdb(path, surrogateKey) {
+async function fetchTmdb(path, surrogateKey, fresh) {
   return timedFetch(`${TMDB_BASE}${path}`, {
     headers: { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' },
-    cacheOverride: new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey })
+    cacheOverride: fetchCacheOverride(fresh, surrogateKey)
   });
 }
 
@@ -84,6 +81,7 @@ async function moviesHandler(req) {
   const started = Date.now();
   const url = new URL(req.url);
   const q = (url.searchParams.get('q') ?? '').trim();
+  const fresh = wantsFresh(url);
 
   if (q.length < 1 || q.length > 100) {
     return error(req, 400, 'BAD_REQUEST', 'q is required and must be 1-100 characters');
@@ -92,7 +90,8 @@ async function moviesHandler(req) {
   const surrogateKey = `movies movies-q-${slug(q)}`;
   const { ok, response, ms, error: kind } = await fetchTmdb(
     `/search/movie?query=${encodeURIComponent(q)}`,
-    surrogateKey
+    surrogateKey,
+    fresh
   );
 
   if (!ok || !response.ok) {
@@ -114,7 +113,7 @@ async function moviesHandler(req) {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
         ...backendAgeHeader(response),
-        'Surrogate-Control': SURROGATE_CONTROL,
+        ...cacheHeaders(fresh),
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
       }
@@ -127,13 +126,14 @@ async function movieHandler(req) {
   const started = Date.now();
   const url = new URL(req.url);
   const idParam = url.searchParams.get('id') ?? '';
+  const fresh = wantsFresh(url);
 
   if (!/^\d+$/.test(idParam)) {
     return error(req, 400, 'BAD_REQUEST', 'id is required and must be numeric');
   }
 
   const surrogateKey = `movies movie-${idParam}`;
-  const { ok, response, ms, error: kind } = await fetchTmdb(`/movie/${idParam}`, surrogateKey);
+  const { ok, response, ms, error: kind } = await fetchTmdb(`/movie/${idParam}`, surrogateKey, fresh);
 
   if (ok && response.status === 404) {
     return error(req, 404, 'NOT_FOUND', `No movie with id ${idParam}`, {
@@ -169,7 +169,7 @@ async function movieHandler(req) {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
         ...backendAgeHeader(response),
-        'Surrogate-Control': SURROGATE_CONTROL,
+        ...cacheHeaders(fresh),
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
       }

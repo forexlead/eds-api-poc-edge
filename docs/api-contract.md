@@ -13,15 +13,16 @@ Base URL
 |---|---|
 | `Content-Type` | `application/json; charset=utf-8` |
 | `Access-Control-Allow-Origin` | echo request `Origin` if it matches `^https://[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.(page\|live)$` or `http://localhost:3000`; otherwise omit |
-| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, Age` |
+| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, Age` |
 | `Timing-Allow-Origin` | `*` (lets the browser Resource Timing API report sizes/timings cross-origin) |
 | `Vary` | `Origin` |
 | `X-Pattern` | `proxy` \| `aggregate` \| `transform` \| `failover` \| `health` |
 | `X-Fetched-At` | **single-upstream routes only** (`movies`, `movie`, `lite`): the upstream response's own `Date` header (preserved in the fetch cache, so an old value = served from cache; a new value after purge = refetched). `dashboard` omits it by design — see below. |
 | `X-Backend-Age` | **single-upstream routes only** (`movies`, `movie`, `lite`): passthrough of the upstream response's own `Age` header, when present; omitted when the backend didn't send one. A supplementary signal only — many backends (TMDB included) don't set `Age` on every response, so its absence doesn't mean "not cached". `dashboard` omits it by design — see below. |
 | `Server-Timing` | one entry per backend call, e.g. `tmdb;dur=142, weather;dur=88, edge;dur=151` — **this is the primary cache-hit signal**: on a Fastly fetch-cache hit the backend call returns from the local cache in well under a few ms, vs. ~70ms+ for a live round trip to TMDB. `X-Fetched-At`/`X-Backend-Age` corroborate but `tmdb;dur` is what to check first. |
-| `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge — we measure the edge, not the browser cache) |
-| `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (honoured by the Adobe CDN in front of the stage environment) |
+| `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge — we measure the edge, not the browser cache); `no-store` on a `fresh=1` response |
+| `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (honoured by the Adobe CDN in front of the stage environment); `no-store` on a `fresh=1` response |
+| `X-Cache-Mode` | cacheable routes only (`movies`, `movie`, `dashboard`, `lite`), on success responses: `fresh` when the request had `fresh=1`, otherwise `cached` — see "`fresh` flag" below |
 | `Surrogate-Key` | as listed per route |
 
 `OPTIONS` on any `/api/*` → `204` with `Access-Control-Allow-Methods: GET, OPTIONS`, `Access-Control-Allow-Headers: Content-Type`, `Access-Control-Max-Age: 86400`.
@@ -29,6 +30,14 @@ Base URL
 Errors → `{ "error": { "code": "BAD_REQUEST|UPSTREAM|NOT_FOUND", "message": "..." } }` with matching status. **Never** include upstream URLs with credentials, auth headers, or the token in any response or log line.
 
 Backend fetches: fetch cache via `CacheOverride` (`ttl: 60, swr: 300`, `surrogateKey` = same keys as response) on cacheable routes; timeout 1500 ms per backend (Promise.race).
+
+### `fresh` flag (cold vs. warm demo)
+`movies`, `movie`, `dashboard` and `lite` accept an optional `fresh=1` query parameter (any other value, or absent, = normal behaviour):
+- every backend fetch uses `CacheOverride("pass")` instead of the ttl/swr override, so it always goes to the upstream (a cold call — `Server-Timing` shows the live round trip);
+- the response carries `Cache-Control: no-store` and `Surrogate-Control: no-store`, so neither the browser nor the Adobe CDN stores it;
+- `X-Cache-Mode: fresh` (vs. `cached` without the flag).
+
+A `fresh=1` request does not refresh the fetch cache for the next plain request — `pass` neither reads nor writes it. Everything else (body shape, `Surrogate-Key`, other headers) is unchanged.
 
 ---
 

@@ -20,10 +20,13 @@ const ALLOWED_ORIGIN_RE = /^https:\/\/[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.
 const ALLOWED_ORIGIN_LITERAL = 'http://localhost:3000';
 
 const EXPOSE_HEADERS =
-  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, Age';
+  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, Age';
 
 /** The browser always revalidates against the edge — we measure the edge, not the browser cache. */
 const BROWSER_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
+
+/** Cacheable routes only (docs/api-contract.md "Common response rules"). */
+const SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
 
 /** Default per-backend budget (docs/api-contract.md). */
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -47,6 +50,22 @@ function corsHeaders(req) {
   const origin = allowedOrigin(req?.headers?.get('Origin'));
   if (origin) headers['Access-Control-Allow-Origin'] = origin;
   return headers;
+}
+
+/** `?fresh=1` asks a cacheable route to bypass the fetch cache (cold vs. warm demo). */
+function wantsFresh(url) {
+  return url.searchParams.get('fresh') === '1';
+}
+
+/**
+ * Cache headers for a cacheable route's response. A fresh response must not be stored by
+ * the browser or the CDN either, or the next plain request would be served from it.
+ * @param {boolean} fresh
+ */
+function cacheHeaders(fresh) {
+  return fresh
+    ? { 'Cache-Control': 'no-store', 'Surrogate-Control': 'no-store', 'X-Cache-Mode': 'fresh' }
+    : { 'Surrogate-Control': SURROGATE_CONTROL, 'X-Cache-Mode': 'cached' };
 }
 
 /**
@@ -129,9 +148,12 @@ export {
   ALLOWED_ORIGIN_LITERAL,
   EXPOSE_HEADERS,
   BROWSER_CACHE_CONTROL,
+  SURROGATE_CONTROL,
   DEFAULT_TIMEOUT_MS,
   allowedOrigin,
   corsHeaders,
+  wantsFresh,
+  cacheHeaders,
   serverTiming,
   json,
   error,

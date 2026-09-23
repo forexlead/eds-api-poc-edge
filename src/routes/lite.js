@@ -17,14 +17,12 @@ governing permissions and limitations under the License.
 // returns a small transformed subset — X-Original-Bytes/X-Transformed-Bytes make the
 // reduction visible to the caller.
 
-import { CacheOverride } from 'fastly:cache-override';
-import { error, json, serverTiming, timedFetch } from '../lib/http.js';
+import { fetchCacheOverride } from '../lib/cache.js';
+import { cacheHeaders, error, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
 
 const POKEAPI_BASE = 'https://pokeapi.co/api/v2';
 const MIN_ID = 1;
 const MAX_ID = 1025;
-
-const SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
 
 const STAT_NAMES = ['hp', 'attack', 'defense', 'speed'];
 
@@ -66,9 +64,10 @@ async function liteHandler(req) {
   }
   const id = Number(idParam);
   const surrogateKey = `pokemon pokemon-${id}`;
+  const fresh = wantsFresh(url);
 
   const { ok, response, ms, error: kind } = await timedFetch(`${POKEAPI_BASE}/pokemon/${id}`, {
-    cacheOverride: new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey })
+    cacheOverride: fetchCacheOverride(fresh, surrogateKey)
   });
 
   if (ok && response.status === 404) {
@@ -99,7 +98,7 @@ async function liteHandler(req) {
       'X-Transformed-Bytes': String(transformedBytes),
       'X-Fetched-At': fetchedAt,
       ...backendAgeHeader(response),
-      'Surrogate-Control': SURROGATE_CONTROL,
+      ...cacheHeaders(fresh),
       'Surrogate-Key': surrogateKey,
       'Server-Timing': serverTiming({ pokemon: ms, edge: Date.now() - started })
     }

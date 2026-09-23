@@ -20,9 +20,9 @@ governing permissions and limitations under the License.
 // movies/movie — this route does not set X-Fetched-At/X-Backend-Age; each source's own
 // `ms` in Server-Timing (near-0ms on a fetch-cache hit) is the per-source cache signal.
 
-import { CacheOverride } from 'fastly:cache-override';
 import { TMDB_TOKEN } from '../generated/secrets.js';
-import { json, serverTiming, timedFetch } from '../lib/http.js';
+import { fetchCacheOverride } from '../lib/cache.js';
+import { cacheHeaders, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const MAX_TRENDING = 5;
@@ -33,7 +33,6 @@ const DEFAULT_LAT = 35.79;
 const DEFAULT_LON = -78.78;
 
 const SURROGATE_KEY = 'dashboard';
-const SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
 
 /** Mirrors routes/movies.js's posterUrl — kept local so the two patterns stay decoupled. */
 function posterUrl(path) {
@@ -64,23 +63,23 @@ function resolveCoords(url, geo) {
   return { lat: DEFAULT_LAT, lon: DEFAULT_LON };
 }
 
-function fetchTmdbTrending() {
+function fetchTmdbTrending(fresh) {
   return timedFetch(`${TMDB_BASE}/trending/movie/day`, {
     headers: { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' },
-    cacheOverride: new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey: SURROGATE_KEY })
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
   });
 }
 
-function fetchWeather(lat, lon) {
+function fetchWeather(lat, lon, fresh) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,weather_code`;
   return timedFetch(url, {
-    cacheOverride: new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey: SURROGATE_KEY })
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
   });
 }
 
-function fetchPokemon(id) {
+function fetchPokemon(id, fresh) {
   return timedFetch(`https://pokeapi.co/api/v2/pokemon/${id}`, {
-    cacheOverride: new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey: SURROGATE_KEY })
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
   });
 }
 
@@ -140,12 +139,13 @@ async function dashboardHandler(req, ctx = {}) {
   const started = Date.now();
   const url = new URL(req.url);
   const { lat, lon } = resolveCoords(url, ctx.geo);
+  const fresh = wantsFresh(url);
   const pokemonId = 1 + Math.floor(Math.random() * POKEMON_MAX_ID);
 
   const settled = await Promise.allSettled([
-    fetchTmdbTrending(),
-    fetchWeather(lat, lon),
-    fetchPokemon(pokemonId)
+    fetchTmdbTrending(fresh),
+    fetchWeather(lat, lon, fresh),
+    fetchPokemon(pokemonId, fresh)
   ]);
 
   const [tmdb, weather, pokemon] = await Promise.all([
@@ -171,7 +171,7 @@ async function dashboardHandler(req, ctx = {}) {
     {
       headers: {
         'X-Pattern': 'aggregate',
-        'Surrogate-Control': SURROGATE_CONTROL,
+        ...cacheHeaders(fresh),
         'Surrogate-Key': SURROGATE_KEY,
         'Server-Timing': serverTiming({
           tmdb: tmdb.ms,
