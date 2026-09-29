@@ -18,7 +18,7 @@ governing permissions and limitations under the License.
 // reduction visible to the caller.
 
 import { fetchCacheOverride } from '../lib/cache.js';
-import { cacheHeaders, error, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
+import { cacheHeaders, error, json, serverTiming, STANDARD_CACHE, timedFetch, wantsFresh } from '../lib/http.js';
 
 const POKEAPI_BASE = 'https://pokeapi.co/api/v2';
 const MIN_ID = 1;
@@ -67,7 +67,7 @@ async function liteHandler(req) {
   const fresh = wantsFresh(url);
 
   const { ok, response, ms, error: kind } = await timedFetch(`${POKEAPI_BASE}/pokemon/${id}`, {
-    cacheOverride: fetchCacheOverride(fresh, surrogateKey)
+    cacheOverride: fetchCacheOverride(fresh, surrogateKey, STANDARD_CACHE)
   });
 
   if (ok && response.status === 404) {
@@ -98,7 +98,7 @@ async function liteHandler(req) {
       'X-Transformed-Bytes': String(transformedBytes),
       'X-Fetched-At': fetchedAt,
       ...backendAgeHeader(response),
-      ...cacheHeaders(fresh),
+      ...cacheHeaders(fresh, STANDARD_CACHE),
       'Surrogate-Key': surrogateKey,
       'Server-Timing': serverTiming({ pokemon: ms, edge: Date.now() - started })
     }

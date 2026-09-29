@@ -19,6 +19,7 @@ import { moviesHandler, movieHandler } from './routes/movies.js';
 import { dashboardHandler } from './routes/dashboard.js';
 import { liteHandler } from './routes/lite.js';
 import { resilientHandler } from './routes/resilient.js';
+import { mypageHandler, productHandler, quoteHandler, stockHandler } from './routes/cache-lab.js';
 
 // `addEventListener` only exists on Compute; guarding it lets mocha import this router.
 if (typeof addEventListener === 'function') {
@@ -32,7 +33,11 @@ const ROUTES = {
   '/api/movie': movieHandler,
   '/api/dashboard': dashboardHandler,
   '/api/lite': liteHandler,
-  '/api/resilient': resilientHandler
+  '/api/resilient': resilientHandler,
+  '/api/cache/product': productHandler,
+  '/api/cache/stock': stockHandler,
+  '/api/cache/mypage': mypageHandler,
+  '/api/cache/quote': quoteHandler
 };
 
 function popName() {

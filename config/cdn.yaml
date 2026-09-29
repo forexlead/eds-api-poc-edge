@@ -24,3 +24,10 @@ data:
         action:
           type: selectAemOrigin
           originName: edgefunction-api-poc
+      # Cache Lab (docs/cache-lab.md): CDN-cacheable — the CDN must be in the path; each
+      # route sets its own Surrogate-Control (mypage sets no-store)
+      - name: route-api-cache-lab
+        when: { reqProperty: path, matches: "^/api/cache/(product|stock|mypage|quote)$" }
+        action:
+          type: selectAemOrigin
+          originName: edgefunction-api-poc

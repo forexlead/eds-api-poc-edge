@@ -20,7 +20,7 @@ governing permissions and limitations under the License.
 
 import { TMDB_TOKEN } from '../generated/secrets.js';
 import { fetchCacheOverride } from '../lib/cache.js';
-import { cacheHeaders, error, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
+import { cacheHeaders, error, json, serverTiming, STANDARD_CACHE, timedFetch, wantsFresh } from '../lib/http.js';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const MAX_RESULTS = 10;
@@ -72,7 +72,7 @@ function toSummary(item) {
 async function fetchTmdb(path, surrogateKey, fresh) {
   return timedFetch(`${TMDB_BASE}${path}`, {
     headers: { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' },
-    cacheOverride: fetchCacheOverride(fresh, surrogateKey)
+    cacheOverride: fetchCacheOverride(fresh, surrogateKey, STANDARD_CACHE)
   });
 }
 
@@ -113,7 +113,7 @@ async function moviesHandler(req) {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
         ...backendAgeHeader(response),
-        ...cacheHeaders(fresh),
+        ...cacheHeaders(fresh, STANDARD_CACHE),
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
       }
@@ -169,7 +169,7 @@ async function movieHandler(req) {
         'X-Pattern': 'proxy',
         'X-Fetched-At': fetchedAt,
         ...backendAgeHeader(response),
-        ...cacheHeaders(fresh),
+        ...cacheHeaders(fresh, STANDARD_CACHE),
         'Surrogate-Key': surrogateKey,
         'Server-Timing': serverTiming({ tmdb: ms, edge: Date.now() - started })
       }

@@ -22,7 +22,7 @@ governing permissions and limitations under the License.
 
 import { TMDB_TOKEN } from '../generated/secrets.js';
 import { fetchCacheOverride } from '../lib/cache.js';
-import { cacheHeaders, json, serverTiming, timedFetch, wantsFresh } from '../lib/http.js';
+import { cacheHeaders, json, serverTiming, STANDARD_CACHE, timedFetch, wantsFresh } from '../lib/http.js';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const MAX_TRENDING = 5;
@@ -66,20 +66,20 @@ function resolveCoords(url, geo) {
 function fetchTmdbTrending(fresh) {
   return timedFetch(`${TMDB_BASE}/trending/movie/day`, {
     headers: { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' },
-    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY, STANDARD_CACHE)
   });
 }
 
 function fetchWeather(lat, lon, fresh) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,weather_code`;
   return timedFetch(url, {
-    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY, STANDARD_CACHE)
   });
 }
 
 function fetchPokemon(id, fresh) {
   return timedFetch(`https://pokeapi.co/api/v2/pokemon/${id}`, {
-    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY)
+    cacheOverride: fetchCacheOverride(fresh, SURROGATE_KEY, STANDARD_CACHE)
   });
 }
 
@@ -171,7 +171,7 @@ async function dashboardHandler(req, ctx = {}) {
     {
       headers: {
         'X-Pattern': 'aggregate',
-        ...cacheHeaders(fresh),
+        ...cacheHeaders(fresh, STANDARD_CACHE),
         'Surrogate-Key': SURROGATE_KEY,
         'Server-Timing': serverTiming({
           tmdb: tmdb.ms,

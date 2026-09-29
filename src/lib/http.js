@@ -20,13 +20,19 @@ const ALLOWED_ORIGIN_RE = /^https:\/\/[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.
 const ALLOWED_ORIGIN_LITERAL = 'http://localhost:3000';
 
 const EXPOSE_HEADERS =
-  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, Age';
+  'Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, X-Backend-Calls, Age';
 
 /** The browser always revalidates against the edge — we measure the edge, not the browser cache. */
 const BROWSER_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 
-/** Cacheable routes only (docs/api-contract.md "Common response rules"). */
-const SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
+/**
+ * A cache policy drives both layers: `ttl`/`swr` feed the fetch cache (lib/cache.js) and,
+ * with `sie`, the response's Surrogate-Control for the CDN. Any field may be omitted.
+ * @typedef {{ ttl: number, swr?: number, sie?: number }} CachePolicy
+ */
+
+/** The cacheable routes' policy (docs/api-contract.md "Common response rules"). */
+const STANDARD_CACHE = Object.freeze({ ttl: 60, swr: 300, sie: 86400 });
 
 /** Default per-backend budget (docs/api-contract.md). */
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -58,14 +64,26 @@ function wantsFresh(url) {
 }
 
 /**
+ * Surrogate-Control value for a policy, e.g. `max-age=60, stale-while-revalidate=300`.
+ * @param {CachePolicy} policy
+ */
+function surrogateControl({ ttl, swr, sie }) {
+  const parts = [`max-age=${ttl}`];
+  if (swr !== undefined) parts.push(`stale-while-revalidate=${swr}`);
+  if (sie !== undefined) parts.push(`stale-if-error=${sie}`);
+  return parts.join(', ');
+}
+
+/**
  * Cache headers for a cacheable route's response. A fresh response must not be stored by
  * the browser or the CDN either, or the next plain request would be served from it.
  * @param {boolean} fresh
+ * @param {CachePolicy} policy
  */
-function cacheHeaders(fresh) {
+function cacheHeaders(fresh, policy) {
   return fresh
     ? { 'Cache-Control': 'no-store', 'Surrogate-Control': 'no-store', 'X-Cache-Mode': 'fresh' }
-    : { 'Surrogate-Control': SURROGATE_CONTROL, 'X-Cache-Mode': 'cached' };
+    : { 'Surrogate-Control': surrogateControl(policy), 'X-Cache-Mode': 'cached' };
 }
 
 /**
@@ -148,11 +166,12 @@ export {
   ALLOWED_ORIGIN_LITERAL,
   EXPOSE_HEADERS,
   BROWSER_CACHE_CONTROL,
-  SURROGATE_CONTROL,
+  STANDARD_CACHE,
   DEFAULT_TIMEOUT_MS,
   allowedOrigin,
   corsHeaders,
   wantsFresh,
+  surrogateControl,
   cacheHeaders,
   serverTiming,
   json,

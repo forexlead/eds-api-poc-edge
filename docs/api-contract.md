@@ -5,7 +5,7 @@ Shared contract between the edge function (`eds-api-poc-edge`) and the EDS block
 Base URL
 - **Deployed (current path):** `https://publish-p24773-e1511008.adobeaemcloud.com/api/...` — Adobe-managed CDN of the sandbox **stage** environment (program 24773, env e1511008). The EDS site (`*.aem.page` / `*.aem.live` / `localhost:3000`) calls it **cross-origin** → CORS rules below apply.
 - Local function dev: `http://127.0.0.1:7676`
-- Routing: `config/cdn.yaml` (envTypes: stage) sends `^/api/(health|resilient)$` (skipCache) and `^/api/(movies|movie|dashboard|lite)$` (CDN-cacheable) to `edgefunction-api-poc`
+- Routing: `config/cdn.yaml` (envTypes: stage) sends `^/api/(health|resilient)$` (skipCache), `^/api/(movies|movie|dashboard|lite)$` (CDN-cacheable) and `^/api/cache/(product|stock|mypage|quote)$` (CDN-cacheable — the Cache Lab, contract in `docs/cache-lab.md`) to `edgefunction-api-poc`
 - Future (production program + custom domain): same-origin `https://edspoc.edcfunctions.lol/api/...` — sandbox programs do not support custom domains.
 
 ## Common response rules (every route)
@@ -13,15 +13,15 @@ Base URL
 |---|---|
 | `Content-Type` | `application/json; charset=utf-8` |
 | `Access-Control-Allow-Origin` | echo request `Origin` if it matches `^https://[a-z0-9-]+--eds-api-poc--[a-z0-9-]+\.aem\.(page\|live)$` or `http://localhost:3000`; otherwise omit |
-| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, Age` |
+| `Access-Control-Expose-Headers` | `Server-Timing, X-Pattern, X-Fallback, X-Original-Bytes, X-Transformed-Bytes, X-Fetched-At, X-Backend-Age, X-Cache-Mode, X-Backend-Calls, Age` |
 | `Timing-Allow-Origin` | `*` (lets the browser Resource Timing API report sizes/timings cross-origin) |
 | `Vary` | `Origin` |
-| `X-Pattern` | `proxy` \| `aggregate` \| `transform` \| `failover` \| `health` |
+| `X-Pattern` | `proxy` \| `aggregate` \| `transform` \| `failover` \| `health` \| `cache-lab` |
 | `X-Fetched-At` | **single-upstream routes only** (`movies`, `movie`, `lite`): the upstream response's own `Date` header (preserved in the fetch cache, so an old value = served from cache; a new value after purge = refetched). `dashboard` omits it by design — see below. |
 | `X-Backend-Age` | **single-upstream routes only** (`movies`, `movie`, `lite`): passthrough of the upstream response's own `Age` header, when present; omitted when the backend didn't send one. A supplementary signal only — many backends (TMDB included) don't set `Age` on every response, so its absence doesn't mean "not cached". `dashboard` omits it by design — see below. |
 | `Server-Timing` | one entry per backend call, e.g. `tmdb;dur=142, weather;dur=88, edge;dur=151` — **this is the primary cache-hit signal**: on a Fastly fetch-cache hit the backend call returns from the local cache in well under a few ms, vs. ~70ms+ for a live round trip to TMDB. `X-Fetched-At`/`X-Backend-Age` corroborate but `tmdb;dur` is what to check first. |
 | `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge — we measure the edge, not the browser cache); `no-store` on a `fresh=1` response |
-| `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (honoured by the Adobe CDN in front of the stage environment); `no-store` on a `fresh=1` response |
+| `Surrogate-Control` | cacheable routes only: `max-age=60, stale-while-revalidate=300, stale-if-error=86400` (Cache Lab routes set their own — see `docs/cache-lab.md`) (honoured by the Adobe CDN in front of the stage environment); `no-store` on a `fresh=1` response |
 | `X-Cache-Mode` | cacheable routes only (`movies`, `movie`, `dashboard`, `lite`), on success responses: `fresh` when the request had `fresh=1`, otherwise `cached` — see "`fresh` flag" below |
 | `Surrogate-Key` | as listed per route |
 

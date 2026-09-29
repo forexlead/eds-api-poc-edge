@@ -19,14 +19,19 @@ import { CacheOverride } from 'fastly:cache-override';
 
 /**
  * `fresh=1` → "pass" (skip the fetch cache entirely, so the demo shows a cold call);
- * otherwise the contract's ttl/swr override tagged with the route's surrogate keys.
+ * otherwise the policy's ttl/swr override tagged with the route's surrogate keys.
+ *
+ * No beforeSend/afterSend hooks: they need the HTTP cache API (`--enable-http-cache`), which
+ * this runtime rejects ("HTTP caching API is not enabled"), failing the fetch outright.
  * @param {boolean} fresh
  * @param {string} surrogateKey
+ * @param {import('./http.js').CachePolicy} policy
  */
-function fetchCacheOverride(fresh, surrogateKey) {
-  return fresh
-    ? new CacheOverride('pass')
-    : new CacheOverride('override', { ttl: 60, swr: 300, surrogateKey });
+function fetchCacheOverride(fresh, surrogateKey, policy) {
+  if (fresh) return new CacheOverride('pass');
+  const init = { ttl: policy.ttl, surrogateKey };
+  if (policy.swr !== undefined) init.swr = policy.swr;
+  return new CacheOverride('override', init);
 }
 
 export { fetchCacheOverride };
