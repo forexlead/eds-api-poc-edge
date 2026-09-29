@@ -1,7 +1,7 @@
 kind: 'CDN'
 version: '1'
 metadata:
-  envTypes: ["stage"]
+  envTypes: ["dev"]
 data:
   originSelectors:
     rules:

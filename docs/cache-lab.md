@@ -1,7 +1,7 @@
 # Cache Lab — `/api/cache/*` contract
 
 Four routes, each demonstrating one CDN caching behaviour on the Adobe-managed CDN in front of the
-sandbox stage environment. Everything in `docs/api-contract.md` → "Common response rules" applies
+sandbox dev environment (`aem-cloud-on-dentsu-dev-gradial`, e1522172). Everything in `docs/api-contract.md` → "Common response rules" applies
 (CORS allowlist, `Timing-Allow-Origin: *`, `Vary: Origin`, `Access-Control-Expose-Headers`,
 `OPTIONS` → 204, error envelope) unless this page says otherwise.
 
@@ -150,7 +150,7 @@ the contract's primary cache-hit signal: a fetch-cache hit returns in a few ms, 
 in tens of ms or more. Failed fetches (timeouts, network errors) are not counted. Local `serve`
 (Viceroy) has no fetch cache, so locally every fetch is a miss.
 
-## Observed on the deployed function (package 8, debug host, 2026-09-29)
+## Observed on the deployed function (package 8, stage env e1511008 debug host, 2026-09-29 — before the move to dev)
 
 These results come from calling the function directly (`edgefunction-p24773-e1511008-api-poc.adobeaemcloud.com`),
 with no Adobe CDN in front, so they show the fetch-cache layer only:
@@ -171,7 +171,7 @@ with no Adobe CDN in front, so they show the fetch-cache layer only:
 ## Proof sequence (run after the config pipeline has deployed `route-api-cache-lab`)
 
 ```bash
-BASE=https://publish-p24773-e1511008.adobeaemcloud.com
+BASE=https://publish-p24773-e1522172.adobeaemcloud.com
 hdr() { echo "--- $(date -u +%T) $1"; curl -sI --compressed "$BASE$1" "${@:2}" \
   | grep -iE '^(HTTP/|age:|x-cache:|x-fetched-at:|x-backend-calls:|x-cache-mode:|server-timing:|cache-control:)'; }
 
