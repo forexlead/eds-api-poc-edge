@@ -125,18 +125,19 @@ No backend: the function generates the quote and stamps it with the time it was 
 
 `break=1` makes the function itself answer `503` (`{ "error": { "code": "UPSTREAM", ... } }`, with
 `Cache-Control: no-store`, `Surrogate-Control: no-store`), so the CDN sees an origin error. `break`
-absent = `0`; any other value → `400`.
+absent = `0`; any other value → `400`. **Through the Adobe CDN, clients never see that JSON:** the CDN
+replaces an origin 503 with its own HTML error page (`content-type: text/html`). Observed on dev,
+2026-09-29 — see the proof pass below.
 
 **Cache-key caveat.** The query string is part of the CDN cache key, so `?break=1` is a *different*
 object from `/api/cache/quote`. It has never held a good copy, so there is nothing stale to serve and
 it can't exercise `stale-if-error` for the plain URL. The function therefore also honours a request
 header **`X-Break: 1`**, which leaves the cache key unchanged: once the plain URL's 10 s TTL has passed,
-`curl -H 'X-Break: 1' $BASE/api/cache/quote` forces the CDN's refetch to fail. That header only matters
-if the CDN forwards it to the origin; the curl results show whether it does.
+`curl -H 'X-Break: 1' $BASE/api/cache/quote` forces the CDN's refetch to fail. The CDN does forward
+the header to the origin (verified on dev: `X-Break: 1` on a never-requested key returned 503).
 
 Whether the Adobe CDN serves stale on an origin 503 (rather than only on a connection failure) is
-undocumented. **Not yet observed:** until the config pipeline deploys `route-api-cache-lab`, the public
-host returns 503 for `/api/cache/*` without reaching the function. Record the answer here after the proof run.
+undocumented. **Observed on dev, 2026-09-29: it serves the stale copy.** See the proof pass, test 4.
 
 ## How `X-Backend-Calls` is counted
 
@@ -168,11 +169,111 @@ with no Adobe CDN in front, so they show the fetch-cache layer only:
   route's point. The CDN-level short-TTL behaviour of `stock` doesn't depend on this.
 - Without `afterSend`, the function can't strip the upstream `Age` before the object is stored.
 
-## Proof sequence (run after the config pipeline has deployed `route-api-cache-lab`)
+## Proof pass — dev environment (`aem-cloud-on-dentsu-dev-gradial`, e1522172), 2026-09-29
+
+Base `https://publish-p24773-e1522172.adobeaemcloud.com`, through the Adobe CDN (POP IAD), requests
+from 17:45 to 17:47 UTC. Every request was a GET (`curl -s --compressed -D - -o /dev/null`).
+
+### 1. product ×3 — as expected
+
+| UTC | status | x-cache | age | X-Fetched-At | Server-Timing |
+|---|---|---|---|---|---|
+| 17:45:06 | 200 | MISS | 0 | 17:45:07 | `tmdb;dur=237, edge;dur=238` |
+| 17:45:11 | 200 | HIT | 4 | 17:45:07 | `tmdb;dur=237, edge;dur=238` (stored copy) |
+| 17:45:15 | 200 | HIT | 9 | 17:45:07 | `tmdb;dur=237, edge;dur=238` (stored copy) |
+
+### 2. stock — SWR works on id=603; **id=1 as specified doesn't exist**
+
+**Contradiction:** TMDB has no movie 1 (`/3/movie/1/release_dates` → 404), so `/api/cache/stock?id=1` returns
+`404 NOT_FOUND`. It carries no `Surrogate-Control`, so the CDN never stores it: all four requests were
+`MISS`, `age: 0`. It demonstrates nothing about SWR. (The function's *fetch cache* did store the TMDB 404:
+`tmdb;dur` went 98 → 4 → 2 → 1.) The same schedule was run on **id=603** in parallel:
+
+| t | UTC | x-cache | age | reading / X-Fetched-At | Server-Timing |
+|---|---|---|---|---|---|
+| +0 s | 17:45:15 | MISS | 0 | **13:28:02** (`readingAgeSeconds: 15435`) | `tmdb;dur=259` |
+| +13 s | 17:45:28 | HIT | 12 | 13:28:02 | stored |
+| +26 s | 17:45:41 | HIT | **25** | 13:28:02 — **stale, served instantly** (age > max-age 20, inside swr 120) | stored |
+| +40 s | 17:45:55 | HIT | 14 | **17:45:41** (`readingAgeSeconds: 1`) — newer reading | `tmdb;dur=233` |
+
+The +26 s request got the stale copy and triggered a background refresh at 17:45:41. The +40 s request
+got that refreshed object, now 14 s old. That is stale-while-revalidate, as designed.
+
+**Contradiction:** the first reading was over 4 hours old (13:28:02). TMDB's CloudFront served a cached
+object with `Age: ~15,400`, so "the stock reading" on a cold start can be hours stale before either of
+our caches is involved.
+
+### 3. mypage ×5 — response never cached ✔; ingredient timestamps **not** identical
+
+Every response: `200`, `cache-control: no-store`, `x-cache-mode: no-store`, `x-cache: MISS`, **no `age`
+header**. The response itself is never cached. ✔
+
+| # | UTC | tier | product fetchedAt | prices fetchedAt | topSellers fetchedAt | X-Backend-Calls |
+|---|---|---|---|---|---|---|
+| 1 | 17:45:55 | gold | 17:45:56 | **13:28:02** | 17:45:56 | 3 |
+| 2 | 17:45:56 | silver | 17:45:56 | **17:45:57** | 17:45:56 | 1 |
+| 3 | 17:45:57 | bronze | 17:45:56 | **17:45:58** | 17:45:56 | 1 |
+| 4 | 17:45:58 | gold | 17:45:56 | **17:45:58** | 17:45:56 | 1 |
+| 5 | 17:45:58 | silver | 17:45:56 | **17:45:59** | 17:45:56 | 1 |
+
+- **product** and **topSellers**: identical upstream timestamps across all five (fetch-cache hits, 2–4 ms,
+  from request 2 on). This is the card C evidence for two of the three ingredients.
+- **prices** (`/3/movie/603/watch/providers`) was re-fetched on **every** request, with a different `Date` each
+  time (21–391 ms). **The three ingredients are not identical across all five.** Checked directly at
+  17:46:41, TMDB's CloudFront returns that URL with `Date: 13:28:02` and `Age: 15519`. Fastly counts the
+  upstream `Age` against our 60 s TTL, so that copy is already expired when stored. The later fetches came
+  back with fresh `Date`s and *still* didn't stick; that part is unexplained (same as stock on stage).
+  Product and topSellers were fresh at CloudFront (`Age: 46`), which is why they cached.
+- The `X-Backend-Calls` estimate matched the per-ingredient timings in every response.
+
+### 4. stale-if-error — **the CDN served the stale copy on an origin 503**
+
+| step | UTC | request | status | x-cache | age | quotedAt |
+|---|---|---|---|---|---|---|
+| a | 17:45:59 | `GET /api/cache/quote` | 200 | MISS | 0 | 17:46:00 |
+| b | — | wait 13 s (max-age=10 expires) | | | | |
+| c | 17:46:13 | same URL + `X-Break: 1` | **200** | HIT | **13** | 17:46:00 |
+| c′ | 17:46:13 | again + `X-Break: 1` | **200** | HIT | **14** | 17:46:00 |
+| e | 17:46:14 | same URL, no header | 200 | MISS | 0 | 17:46:14 (new) |
+| f | 17:46:14 | `?break=1` (separate key) | **503** | MISS | — | Adobe HTML error page |
+| g | 17:46:40 | `?break=0` + `X-Break: 1` (never-requested key) | **503** | MISS | — | Adobe HTML error page |
+
+**Answer: 200 with `age` 13 > 10. The CDN served a stale copy; the error did not pass through.**
+Why this is stale-if-error and not something else:
+- The route sets no stale-while-revalidate (`max-age=10, stale-if-error=86400`). The plain request at step e
+  refetched synchronously (`MISS`, new quote), so the CDN isn't applying a default SWR.
+- The CDN forwards `X-Break` to the function: step g, with no stale copy available, got the 503.
+- So at step c the refetch reached the function, the function answered 503, and the CDN substituted
+  the stale object.
+
+**Contradiction:** when the 503 does pass through (f, g), the client gets **Adobe's HTML error page**, not
+our JSON error envelope. The contract's "Errors → `{ "error": … }`" rule doesn't hold for 5xx through this CDN.
+
+### 5. purge by surrogate key — **the key form alone worked**
+
+| UTC | request | 603: x-cache / age / Server-Timing | 550: x-cache / age |
+|---|---|---|---|
+| 17:47:00 | warm | HIT / 114 / `tmdb;dur=237` | MISS / 0 |
+| 17:47:04 | re-check | HIT / 118 | HIT / 4 |
+| 17:47:05 | `scripts/purge.sh key product-603` | **HTTP 200** | |
+| 17:47:05 | immediately (no sleep) | **MISS / 0 / `tmdb;dur=2`** (refetched) | HIT / 4 (untouched) |
+| 17:47:07 | +2 s | HIT / 3 | HIT / 7 |
+
+603 was refetched from the function on the very next request, and 550 stayed cached. **The key form
+invalidated the CDN copy**, so the URL form (step 5d) was not needed and wasn't run.
+
+**Contradictions with `docs/purge-demo.md`'s expectations:**
+- The purge was soft (`X-AEM-Purge: soft`) and the route has swr 300, but the first request after the purge
+  was a synchronous `MISS`. No stale copy was served while it refreshed.
+- `X-Fetched-At` did **not** change for 603 (still 17:45:07). A CDN purge doesn't touch the function's
+  fetch cache (ttl 3600), so the refetch hit it (`tmdb;dur=2`). A changed `X-Fetched-At` needs the fetch
+  cache purged too (`scripts/purge.sh both`). The CDN-level signal is `age`/`x-cache` resetting.
+
+## Proof sequence (re-run)
 
 ```bash
 BASE=https://publish-p24773-e1522172.adobeaemcloud.com
-hdr() { echo "--- $(date -u +%T) $1"; curl -sI --compressed "$BASE$1" "${@:2}" \
+hdr() { echo "--- $(date -u +%T) $1"; curl -s --compressed -D - -o /dev/null "$BASE$1" "${@:2}" \
   | grep -iE '^(HTTP/|age:|x-cache:|x-fetched-at:|x-backend-calls:|x-cache-mode:|server-timing:|cache-control:)'; }
 
 # product: twice
@@ -191,5 +292,6 @@ hdr '/api/cache/quote' -H 'X-Break: 1'          # same cache key, forced origin 
 hdr '/api/cache/quote'
 ```
 
-`curl -I` sends HEAD. The CDN turns it into a GET toward the function. Against local `serve` there's
-no CDN, and the router answers HEAD with 405, so use `curl -s -D - -o /dev/null` locally.
+Always GET (`curl -s -D - -o /dev/null`), never `curl -I`. The router is GET-only, so HEAD returns 405
+wherever it reaches the function directly (local `serve`, the debug host). The public CDN happened to turn
+HEAD into GET on 2026-09-29, but don't rely on that.
