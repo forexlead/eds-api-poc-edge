@@ -121,22 +121,32 @@ describe('Cache Lab /api/cache/*', function () {
   });
 
   describe('stock', function () {
-    it('sets a short TTL with SWR and returns the upstream Date as the reading', async function () {
+    it('sets a short TTL with SWR and returns a reading the function generated', async function () {
+      const before = Date.now();
       const resp = await handleRequest(fetchEvent('/api/cache/stock?id=603'));
       assert.equal(resp.status, 200);
       assertCommon(resp);
       assert.equal(resp.headers.get('Surrogate-Control'), 'max-age=20, stale-while-revalidate=120');
       assert.equal(resp.headers.get('Surrogate-Key'), 'stock-603 stock');
-      assert.equal(resp.headers.get('X-Fetched-At'), UPSTREAM_DATE);
       assert.equal(resp.headers.get('X-Backend-Calls'), '1');
 
       const co = calls[0].opts.cacheOverride;
       assert.equal(calls[0].url, 'https://api.themoviedb.org/3/movie/603/release_dates');
-      assert.deepEqual([co.ttl, co.swr], [20, 120]);
+      assert.deepEqual([co.ttl, co.swr, co.surrogateKey], [20, 120, 'stock stock-feed']);
 
       const body = await resp.json();
-      assert.equal(body.reading, UPSTREAM_DATE);
-      assert.ok(body.readingAgeSeconds > 0);
+      assert.notEqual(body.readingAt, UPSTREAM_DATE, 'reading must not be the upstream Date');
+      assert.ok(Date.parse(body.readingAt) >= Math.floor(before / 1000) * 1000);
+      assert.equal(resp.headers.get('X-Fetched-At'), body.readingAt);
+      assert.ok(Number.isInteger(body.level) && body.level >= 0 && body.level < 500);
+    });
+
+    it('serves any SKU, including ids TMDB does not have, from a valid feed id', async function () {
+      const resp = await handleRequest(fetchEvent('/api/cache/stock?id=1'));
+      assert.equal(resp.status, 200);
+      assert.equal(calls[0].url, 'https://api.themoviedb.org/3/movie/603/release_dates');
+      assert.equal(resp.headers.get('Surrogate-Key'), 'stock-1 stock');
+      assert.equal((await resp.json()).id, 1);
     });
   });
 

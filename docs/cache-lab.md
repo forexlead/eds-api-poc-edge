@@ -18,7 +18,7 @@ Code: `src/routes/cache-lab.js`. Tests: `test/cache-lab-test.js`.
 | `X-Pattern` | `cache-lab` |
 | `X-Backend-Calls` | backend fetches that left the function in this execution (`0` on a full fetch-cache hit) — see "How `X-Backend-Calls` is counted" |
 | `X-Cache-Mode` | `cached` on product/stock/quote; `no-store` on mypage |
-| `X-Fetched-At` | product/stock: upstream TMDB `Date`; quote: the time the quote was generated; mypage: omitted (three upstreams — per-ingredient dates are in the body) |
+| `X-Fetched-At` | product: upstream TMDB `Date`; stock: the reading time (`readingAt`, function-generated); quote: the time the quote was generated; mypage: omitted (three upstreams — per-ingredient dates are in the body) |
 | `Server-Timing` | one entry per backend call plus `edge` |
 | `Cache-Control` | `public, max-age=0, must-revalidate` (browser always asks the edge), except mypage → `no-store` |
 | `Access-Control-Expose-Headers` | the common list, which includes `Age`, `X-Cache-Mode`, `X-Fetched-At`, `X-Backend-Calls` |
@@ -36,7 +36,7 @@ fetch reuses a URL another route fetches (e.g. `/api/movie` uses `/3/movie/<id>`
 | Ingredient | TMDB URL | Fetch cache |
 |---|---|---|
 | product | `/3/movie/<id>?language=en-US` | ttl 3600, swr 300, key `product-<id> products` |
-| stock | `/3/movie/<id>/release_dates` | ttl 20, swr 120, key `stock-<id> stock` |
+| stock (feed, shared by every SKU) | `/3/movie/603/release_dates` | ttl 20, swr 120, key `stock stock-feed` |
 | mypage product | `/3/movie/603?append_to_response=keywords` | ttl 60, key `mypage product-603` |
 | mypage prices | `/3/movie/603/watch/providers` | ttl 60, key `mypage prices` |
 | mypage top sellers | `/3/trending/movie/week` | ttl 60, key `mypage top-sellers` |
@@ -63,18 +63,21 @@ Purge: `aio aem edge-functions purge-cache api-poc -k product-603 [--soft]` (one
 
 - `Surrogate-Control: max-age=20, stale-while-revalidate=120`
 - `Surrogate-Key: stock-<id> stock`
-- Fetch cache: ttl 20, swr 120.
+- Fetch cache: ttl 20, swr 120, on a single feed call shared by every SKU.
 
-The upstream `Date` **is** the stock reading, so staleness shows in the body, not just in `Age`:
+The reading is generated **by the function when it builds the response**: a synthetic stock `level`
+plus `readingAt`. A CDN-cached copy keeps its old reading, and a refreshed one shows a new `readingAt`
+(and usually a new level). Compare `readingAt` with the response `date` to see how stale a copy is.
 
 ```json
-{ "pattern": "cache-lab", "route": "stock", "id": 603,
-  "reading": "Tue, 29 Sep 2026 13:28:02 GMT", "readingAgeSeconds": 1 }
+{ "pattern": "cache-lab", "route": "stock", "id": 1, "level": 421,
+  "readingAt": "Tue, 29 Sep 2026 18:01:08 GMT" }
 ```
 
-`readingAgeSeconds` = seconds between `reading` and when the function ran. On a CDN hit the body is the
-stored one, so compare `reading` with the client's clock (or the response `date`) for true staleness.
-Errors as for product.
+`id` is the SKU and any numeric id works. The backend call (a stand-in warehouse feed) always uses
+`/3/movie/603/release_dates`, an id TMDB actually has. (p9d used `id=1`, which TMDB doesn't have, and got
+404s.) The upstream `Date` is deliberately **not** the reading: in p9d, TMDB's CloudFront returned a
+copy over 4 hours old, which says nothing about our caches. Non-numeric `id` → `400`; feed unreachable → `502`.
 
 ## `GET /api/cache/mypage?tier=gold|silver|bronze` — uncacheable response, cached ingredients
 
@@ -168,6 +171,54 @@ with no Adobe CDN in front, so they show the fetch-cache layer only:
   Consequence: on the deployed edge, `mypage` shows `X-Backend-Calls: 3` on every call, which defeats that
   route's point. The CDN-level short-TTL behaviour of `stock` doesn't depend on this.
 - Without `afterSend`, the function can't strip the upstream `Age` before the object is stored.
+
+## Findings (as of 2026-09-29, dev e1522172)
+
+### F1. A 5xx through this CDN returns Adobe's HTML error page, so our JSON error contract doesn't hold for 5xx
+
+When the function answers 503 and the CDN has no stale copy to substitute, the client gets
+`content-type: text/html`, an Adobe error page (`errors.adobeaemcloud.com` assets), not
+`{ "error": { "code": …, "message": … } }`. Seen on `?break=1` and on `?break=0` + `X-Break: 1` (proof pass,
+test 4). The contract's error envelope holds for the 4xx we emit (400/404, which pass through as JSON),
+**not for 5xx**. Browser code calling these routes must handle a non-JSON 5xx body. Not yet checked: a
+502 from the other routes, which presumably behaves the same.
+
+### F2. A CDN purge doesn't touch the function's fetch cache, so the demo command is `purge.sh both`, not `key`
+
+`scripts/purge.sh key product-603` invalidated the CDN copy (next request `MISS`, `age: 0`), but the
+refetch hit the function's fetch cache (`tmdb;dur=2`, `X-Fetched-At` unchanged at 17:45:07). To show a
+genuinely new upstream fetch, purge both layers:
+
+```bash
+./scripts/purge.sh both product-603 "/api/cache/product?id=603"
+```
+
+(`aio aem edge-functions purge-cache api-poc -k product-603 --soft` for the fetch cache, then the CDN purge.)
+`key`/`url` alone demonstrate CDN invalidation only. Watch `age`/`x-cache`, not `X-Fetched-At`.
+
+### F3. mypage `prices` doesn't stay in the fetch cache: not Set-Cookie or private — an old upstream copy per encoding
+
+Hypothesis tested: *a `Set-Cookie` or `Cache-Control: private` on the prices upstream makes Fastly refuse
+to store it.* **Ruled out.** `GET /3/movie/603/watch/providers` headers at 17:59 UTC:
+
+| header | prices (never cached) | product / topSellers (cached) |
+|---|---|---|
+| `Cache-Control` | `public, max-age=21803` | `public, max-age=14429` / `public, max-age=600` |
+| `Set-Cookie` | none | none |
+| `Vary` | `Accept-Encoding`, `Origin` | same |
+| `Age` | **16280** (`Date: 13:28:02`) | 806 / absent (fresh at time of fetch) |
+
+The difference is `Age`. TMDB's CloudFront keeps a **separate copy per `Accept-Encoding`**. Requested with
+`Accept-Encoding: gzip`, prices came back fresh (`Age` 1–7, `Date` 17:59:40). Requested without it, it came
+back as the 13:28:02 copy with `Age: 16306`. Fastly counts upstream `Age` against our ttl override, so an
+object 4.5 h old is expired the moment it's stored under ttl 60.
+
+**Not proven:** which `Accept-Encoding` the Compute fetch sends. Also not proven: why the later p9d prices
+fetches with *fresh* `Date`s still missed. The function can't see or strip upstream `Age` without the
+`afterSend` hook, which this runtime rejects. The ingredient was **not swapped**: the swap was conditional
+on the Set-Cookie/private hypothesis, which failed. Options: send `Accept-Encoding: gzip` explicitly on
+ingredient fetches (cheap to try, and would also reveal whether encoding is the lever), or swap prices
+for a backend that doesn't sit behind a long-lived shared cache.
 
 ## Proof pass — dev environment (`aem-cloud-on-dentsu-dev-gradial`, e1522172), 2026-09-29
 
@@ -279,8 +330,8 @@ hdr() { echo "--- $(date -u +%T) $1"; curl -s --compressed -D - -o /dev/null "$B
 # product: twice
 hdr '/api/cache/product?id=603'; hdr '/api/cache/product?id=603'
 
-# stock: four times across 30 s
-for i in 1 2 3 4; do hdr '/api/cache/stock?id=603'; [ $i -lt 4 ] && /bin/sleep 10; done
+# stock: four times across 40 s (watch readingAt: frozen on HITs, new after the SWR refresh)
+for at in 0 13 26 40; do hdr '/api/cache/stock?id=1'; [ $at -lt 40 ] && /bin/sleep 13; done
 
 # mypage: five times across the three tiers
 for t in gold silver bronze gold silver; do hdr "/api/cache/mypage?tier=$t"; done
@@ -290,6 +341,11 @@ hdr '/api/cache/quote'; /bin/sleep 12
 hdr '/api/cache/quote?break=1'                 # separate cache key
 hdr '/api/cache/quote' -H 'X-Break: 1'          # same cache key, forced origin error
 hdr '/api/cache/quote'
+
+# purge: both layers (F2) — then 603 refetches with a new X-Fetched-At, 550 stays cached
+hdr '/api/cache/product?id=603'; hdr '/api/cache/product?id=550'
+./scripts/purge.sh both product-603 '/api/cache/product?id=603'
+hdr '/api/cache/product?id=603'; hdr '/api/cache/product?id=550'
 ```
 
 Always GET (`curl -s -D - -o /dev/null`), never `curl -I`. The router is GET-only, so HEAD returns 405
