@@ -131,7 +131,7 @@ function preflight(req) {
     status: 204,
     headers: {
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Break',
       'Access-Control-Max-Age': '86400',
       'Access-Control-Expose-Headers': EXPOSE_HEADERS,
       ...corsHeaders(req)

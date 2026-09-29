@@ -73,7 +73,7 @@ describe('OPTIONS preflight', function () {
     assert.equal(resp.status, 204);
     assert.equal(resp.headers.get('Access-Control-Allow-Origin'), origin);
     assert.equal(resp.headers.get('Access-Control-Allow-Methods'), 'GET, OPTIONS');
-    assert.equal(resp.headers.get('Access-Control-Allow-Headers'), 'Content-Type');
+    assert.equal(resp.headers.get('Access-Control-Allow-Headers'), 'Content-Type, X-Break');
     assert.equal(resp.headers.get('Access-Control-Max-Age'), '86400');
     assert.equal(resp.headers.get('Timing-Allow-Origin'), '*');
     assert.equal(await resp.text(), '');

@@ -25,7 +25,7 @@ Base URL
 | `X-Cache-Mode` | cacheable routes only (`movies`, `movie`, `dashboard`, `lite`), on success responses: `fresh` when the request had `fresh=1`, otherwise `cached` — see "`fresh` flag" below |
 | `Surrogate-Key` | as listed per route |
 
-`OPTIONS` on any `/api/*` → `204` with `Access-Control-Allow-Methods: GET, OPTIONS`, `Access-Control-Allow-Headers: Content-Type`, `Access-Control-Max-Age: 86400`.
+`OPTIONS` on any `/api/*` → `204` with `Access-Control-Allow-Methods: GET, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, X-Break` (`X-Break`: the Cache Lab quote route, `docs/cache-lab.md`), `Access-Control-Max-Age: 86400`.
 
 Errors → `{ "error": { "code": "BAD_REQUEST|UPSTREAM|NOT_FOUND", "message": "..." } }` with matching status. **Never** include upstream URLs with credentials, auth headers, or the token in any response or log line.
 
