@@ -3,6 +3,20 @@ version: '1'
 metadata:
   envTypes: ["dev"]
 data:
+  # CDN purge (scripts/purge.sh). The key comes from the Cloud Manager secret variable
+  # CDN_PURGEKEY_290926 on the dev environment — never write its value here. Declare only
+  # purgeKey1: a second active key is Adobe's documented cause of "Unauthorized purge".
+  authentication:
+    authenticators:
+      - name: purge-auth
+        type: purge
+        purgeKey1: ${{CDN_PURGEKEY_290926}}
+    rules:
+      - name: purge-auth-rule
+        when: { reqProperty: tier, equals: "publish" }
+        action:
+          type: authenticate
+          authenticator: purge-auth
   originSelectors:
     rules:
       # Boilerplate smoke-test route

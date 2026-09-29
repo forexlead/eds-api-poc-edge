@@ -17,7 +17,7 @@ governing permissions and limitations under the License.
 import assert from 'node:assert';
 import { handleRequest } from '../src/index.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 const UPSTREAM_DATE = 'Mon, 21 Sep 2026 18:00:00 GMT';
 
 function fetchEvent(path) {

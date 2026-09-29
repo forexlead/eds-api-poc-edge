@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { handleRequest } from '../src/index.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 
 function token() {
   const raw = readFileSync(new URL('../.env', import.meta.url), 'utf8');

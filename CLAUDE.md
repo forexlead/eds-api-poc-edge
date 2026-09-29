@@ -5,8 +5,8 @@ A single AEM Edge Function named **`api-poc`** running on Adobe's managed Fastly
 
 ## Environment (fixed facts)
 - Adobe org: Dentsu Global Partner Sandbox · Program: AEM Cloud on Dentsu (**p24773, sandbox**)
-- Deploy target: sandbox **AEM stage environment** `aem-cloud-on-dentsu-stage` (e1511008) → public base `https://publish-p24773-e1511008.adobeaemcloud.com`. Sandbox programs do NOT support custom domains, so the EDS site (`main--eds-api-poc--forexlead.aem.page|live`, `localhost:3000`) calls the API **cross-origin** — CORS is mandatory.
-- `aio aem edge-functions setup` is configured with Edge Delivery = **No**, environment = **stage (1511008)**.
+- Deploy target: sandbox **AEM dev environment** `aem-cloud-on-dentsu-dev-gradial` (e1522172) → public base `https://publish-p24773-e1522172.adobeaemcloud.com`. Sandbox programs do NOT support custom domains, so the EDS site (`main--eds-api-poc--forexlead.aem.page|live`, `localhost:3000`) calls the API **cross-origin** — CORS is mandatory.
+- `aio aem edge-functions setup` is configured with Edge Delivery = **No**, environment = **dev (1522172)**.
 - Sandbox environments hibernate after ~8 h idle — de-hibernate in Cloud Manager before testing/demo.
 - Sandbox programs do **not** support Edge Function secrets, ConfigStore or KV store. Do not use `SecretStoreManager`, `ConfigStore`, or `KVStore`.
 

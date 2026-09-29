@@ -16,7 +16,7 @@ governing permissions and limitations under the License.
 import assert from 'node:assert';
 import { handleRequest } from '../src/index.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 
 function fetchEvent(path, { geo } = {}) {
   return { request: new Request(BASE + path), client: { geo } };

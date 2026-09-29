@@ -14,7 +14,7 @@ import assert from 'node:assert';
 import { handleRequest } from '../src/index.js';
 import { allowedOrigin } from '../src/lib/http.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 
 function fetchEvent(path, { method = 'GET', origin } = {}) {
   const headers = origin ? { Origin: origin } : {};

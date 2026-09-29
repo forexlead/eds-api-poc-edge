@@ -17,7 +17,7 @@ governing permissions and limitations under the License.
 import assert from 'node:assert';
 import { handleRequest } from '../src/index.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 const CACHEABLE_SURROGATE_CONTROL = 'max-age=60, stale-while-revalidate=300, stale-if-error=86400';
 
 /** One fake upstream body that satisfies every route's transform. */

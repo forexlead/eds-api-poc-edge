@@ -20,7 +20,7 @@ import { handleRequest } from '../src/index.js';
 import { EXPOSE_HEADERS } from '../src/lib/http.js';
 import { LEFT_FUNCTION_MS } from '../src/routes/cache-lab.js';
 
-const BASE = 'https://publish-p24773-e1511008.adobeaemcloud.com';
+const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 const ORIGIN = 'https://main--eds-api-poc--forexlead.aem.page';
 const UPSTREAM_DATE = 'Mon, 21 Sep 2026 18:00:00 GMT';
 

@@ -20,7 +20,7 @@ and the function's fetch cache (via `CacheOverride`'s `surrogateKey`).
 3. Set the base URL and a helper that prints only the observable signals:
 
 ```bash
-BASE=https://publish-p24773-e1511008.adobeaemcloud.com
+BASE=https://publish-p24773-e1522172.adobeaemcloud.com
 
 sig() {  # sig <path>
   curl -s --compressed -D - -o /dev/null "$BASE$1" \
@@ -110,7 +110,7 @@ requests each id twice.
 ## One-shot script
 
 ```bash
-BASE=https://publish-p24773-e1511008.adobeaemcloud.com
+BASE=https://publish-p24773-e1522172.adobeaemcloud.com
 sig() { curl -s --compressed -D - -o /dev/null "$BASE$1" \
   | grep -iE '^(HTTP/|age:|server-timing:|x-cache-mode:|x-fetched-at:)'; }
 both() { echo "--- 603"; sig '/api/movie?id=603'; echo "--- 550"; sig '/api/movie?id=550'; }
