@@ -16,7 +16,7 @@ Code: `src/routes/cache-lab.js`. Tests: `test/cache-lab-test.js`.
 | Header | Value |
 |---|---|
 | `X-Pattern` | `cache-lab` |
-| `X-Backend-Calls` | backend fetches that left the function in this execution (`0` on a full fetch-cache hit) — see "How `X-Backend-Calls` is counted" |
+| `X-Backend-Calls` | this execution's backend fetches that Fastly's cache didn't answer (`0` when every fetch was a cache hit) — see "How `X-Backend-Calls` is counted" |
 | `X-Cache-Mode` | `cached` on product/stock/quote; `no-store` on mypage |
 | `X-Fetched-At` | product: upstream TMDB `Date`; stock: the reading time (`readingAt`, function-generated); quote: the time the quote was generated; mypage: omitted (three upstreams — per-ingredient dates are in the body) |
 | `Server-Timing` | one entry per backend call plus `edge` |
@@ -144,15 +144,29 @@ undocumented. **Observed on dev, 2026-09-29: it serves the stale copy.** See the
 
 ## How `X-Backend-Calls` is counted
 
-It's inferred, not observed. The obvious mechanism, `CacheOverride`'s `beforeSend` hook, which fires
-only when a request really goes to the backend, needs the Compute HTTP cache API. This runtime rejects
-it: *"HTTP caching API is not enabled for JavaScript; enable it with the --enable-http-cache flag … or
-contact support"*. That happened even when built with `--enable-http-cache`, so every fetch using the hook failed.
+`X-Backend-Calls` counts this execution's fetches that **Fastly's cache did not answer**, i.e. the ones
+that went on to TMDB. Each ingredient's `cache` (`hit`/`miss`) in the mypage body uses the same signal.
 
-So a fetch counts as having left the function when it took **≥ 15 ms** (`LEFT_FUNCTION_MS`). This is
-the contract's primary cache-hit signal: a fetch-cache hit returns in a few ms, a live TMDB round trip
-in tens of ms or more. Failed fetches (timeouts, network errors) are not counted. Local `serve`
-(Viceroy) has no fetch cache, so locally every fetch is a miss.
+**Signal: Fastly's own token at the end of the fetch response's `x-cache`.** Fastly appends its cache
+state after any upstream value, e.g. `Hit from cloudfront, HIT` / `Hit from cloudfront, MISS` (found with
+temporary instrumentation, F4). The last comma-separated token is read if it is exactly `HIT`, `MISS` or
+`PASS` (optionally suffixed, e.g. `HIT-STALE`). `HIT` means a cache hit; `MISS` and `PASS` mean it went to
+the backend. CloudFront's own `Hit from cloudfront` doesn't match, so it can't be mistaken for Fastly's.
+
+**Fallback, only when that token is absent** (e.g. local `serve`/Viceroy): a fetch taking ≥ 15 ms
+(`LEFT_FUNCTION_MS`) counts as a miss. This was the original method, and on the edge it was wrong: hits
+served by another cache node took 21–236 ms and were counted as backend calls (F4).
+
+Why not the direct mechanism: `CacheOverride`'s `beforeSend` hook fires only when a request really
+goes to the backend, but it needs the Compute HTTP cache API. This runtime rejects that (*"HTTP caching
+API is not enabled for JavaScript; enable it with the --enable-http-cache flag … or contact support"*),
+even when built with that flag, and the fetch fails. Failed fetches (timeouts, network errors) are not counted.
+
+Verified on dev, package 5, 2026-09-29 ~18:16 UTC:
+- **Same-node hits:** on the debug host, a never-fetched `product?id=77` counted `1` (`tmdb;dur=34`), then
+  `0` on five 2–3 ms hits across five nodes. A stored object doesn't replay its original `MISS`.
+- **Remote hits:** five mypage visitors all counted `0`, every ingredient `hit`, including one visitor
+  whose fetches took ~400 ms. The duration rule would have reported `3` for each.
 
 ## Observed on the deployed function (package 8, stage env e1511008 debug host, 2026-09-29 — before the move to dev)
 
@@ -267,7 +281,7 @@ What this shows:
 - **`X-Backend-Calls` was wrong here.** It said 3 on all five visitors, but only one fetch (visitor 1,
   prices) was a Fastly `MISS`. These hits took 21–236 ms (a remote cache node, not the local one), so the
   ≥ 15 ms heuristic counted them as backend calls. The subrequest's own `x-cache` last token (`HIT`/`MISS`)
-  looks like a far better signal; not yet adopted.
+  looks like a far better signal. Adopted in p9g (see "How `X-Backend-Calls` is counted").
 
 ## Proof pass — dev environment (`aem-cloud-on-dentsu-dev-gradial`, e1522172), 2026-09-29
 

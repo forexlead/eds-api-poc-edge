@@ -18,7 +18,7 @@ import assert from 'node:assert';
 import { TMDB_TOKEN } from '../src/generated/secrets.js';
 import { handleRequest } from '../src/index.js';
 import { EXPOSE_HEADERS } from '../src/lib/http.js';
-import { LEFT_FUNCTION_MS } from '../src/routes/cache-lab.js';
+import { cacheState, LEFT_FUNCTION_MS } from '../src/routes/cache-lab.js';
 
 const BASE = 'https://publish-p24773-e1522172.adobeaemcloud.com';
 const ORIGIN = 'https://main--eds-api-poc--forexlead.aem.page';
@@ -245,5 +245,23 @@ describe('Cache Lab /api/cache/*', function () {
 
   it('exposes X-Backend-Calls on every route', function () {
     assert.match(EXPOSE_HEADERS, /X-Backend-Calls/);
+  });
+});
+
+describe('cacheState (X-Backend-Calls signal)', function () {
+  const withXCache = (value) => new Response('{}', { headers: value === null ? {} : { 'x-cache': value } });
+
+  it("reads Fastly's token at the end of x-cache, ignoring duration", function () {
+    assert.equal(cacheState(withXCache('Hit from cloudfront, HIT'), 230), 'hit');
+    assert.equal(cacheState(withXCache('Hit from cloudfront, MISS'), 2), 'miss');
+    assert.equal(cacheState(withXCache('HIT'), 500), 'hit');
+    assert.equal(cacheState(withXCache('Miss from cloudfront, PASS'), 1), 'miss');
+    assert.equal(cacheState(withXCache('Hit from cloudfront, HIT-STALE'), 90), 'hit');
+  });
+
+  it("doesn't mistake CloudFront's own value for Fastly's; falls back to duration", function () {
+    assert.equal(cacheState(withXCache('Hit from cloudfront'), 2), 'hit');
+    assert.equal(cacheState(withXCache('Hit from cloudfront'), LEFT_FUNCTION_MS + 5), 'miss');
+    assert.equal(cacheState(withXCache(null), LEFT_FUNCTION_MS + 5), 'miss');
   });
 });

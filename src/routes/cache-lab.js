@@ -46,10 +46,15 @@ const TIERS = {
 const PATTERN = 'cache-lab';
 
 /**
- * A fetch at or above this many ms is counted as having left the function. The runtime gives
- * no hit/miss flag (the beforeSend hook that would is unavailable — see lib/cache.js), so this
- * is the contract's primary cache-hit signal: a fetch-cache hit returns in a few ms, a live
- * TMDB round trip takes tens of ms or more.
+ * Fastly appends its own cache state to a fetch response's `x-cache`, after any upstream value:
+ * `Hit from cloudfront, HIT`. That last token is the hit/miss signal (see docs/cache-lab.md F4).
+ * Uppercase, one word, optional suffix (HIT-STALE); CloudFront's own "Hit from cloudfront" doesn't match.
+ */
+const FASTLY_CACHE_STATE = /^(HIT|MISS|PASS)(-[A-Z]+)?$/;
+
+/**
+ * Fallback when the response carries no Fastly token (e.g. local `serve`): a fetch at or above this
+ * many ms counts as a miss. Unreliable on the edge — hits from another cache node take 20–230 ms.
  */
 const LEFT_FUNCTION_MS = 15;
 
@@ -68,7 +73,7 @@ function yearOf(releaseDate) {
   return Number.isFinite(year) ? year : null;
 }
 
-/** Counts fetches that left the function in this execution (per LEFT_FUNCTION_MS). */
+/** Counts fetches in this execution that Fastly's cache didn't answer (see cacheState). */
 function backendCounter() {
   let calls = 0;
   return {
@@ -82,9 +87,9 @@ function backendCounter() {
 }
 
 /**
- * One TMDB fetch through the fetch cache. `cache` is `miss` when it went to TMDB, `hit` when
- * the fetch cache answered — inferred from its duration (LEFT_FUNCTION_MS). A fetch that
- * failed before reaching TMDB isn't counted.
+ * One TMDB fetch through the fetch cache. `cache` is `hit` when Fastly's cache answered and
+ * `miss` when the request went on to TMDB (see cacheState). A fetch that failed before
+ * reaching TMDB isn't counted.
  */
 async function fetchTmdb(path, surrogateKey, policy, counter, { gzip = false } = {}) {
   const headers = { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' };
@@ -94,9 +99,20 @@ async function fetchTmdb(path, surrogateKey, policy, counter, { gzip = false } =
     cacheOverride: fetchCacheOverride(false, surrogateKey, policy),
     ...(gzip ? { fastly: { decompressGzip: true } } : {})
   });
-  const left = result.ok && result.ms >= LEFT_FUNCTION_MS;
-  if (left) counter.add();
-  return { ...result, cache: left ? 'miss' : 'hit' };
+  const cache = result.ok ? cacheState(result.response, result.ms) : 'miss';
+  if (result.ok && cache === 'miss') counter.add();
+  return { ...result, cache };
+}
+
+/**
+ * `hit` or `miss` from Fastly's token at the end of `x-cache` (PASS counts as a miss); the
+ * duration heuristic only when there is no such token.
+ */
+function cacheState(response, ms) {
+  const token = (response.headers.get('x-cache') ?? '').split(',').pop().trim();
+  const match = FASTLY_CACHE_STATE.exec(token);
+  if (match) return match[1] === 'HIT' ? 'hit' : 'miss';
+  return ms >= LEFT_FUNCTION_MS ? 'miss' : 'hit';
 }
 
 function numericId(req) {
@@ -361,5 +377,6 @@ export {
   MYPAGE_INGREDIENT_CACHE,
   QUOTE_CACHE,
   TIERS,
-  LEFT_FUNCTION_MS
+  LEFT_FUNCTION_MS,
+  cacheState
 };
