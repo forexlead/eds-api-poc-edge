@@ -38,7 +38,7 @@ fetch reuses a URL another route fetches (e.g. `/api/movie` uses `/3/movie/<id>`
 | product | `/3/movie/<id>?language=en-US` | ttl 3600, swr 300, key `product-<id> products` |
 | stock (feed, shared by every SKU) | `/3/movie/603/release_dates` | ttl 20, swr 120, key `stock stock-feed` |
 | mypage product | `/3/movie/603?append_to_response=keywords` | ttl 60, key `mypage product-603` |
-| mypage prices | `/3/movie/603/watch/providers` | ttl 60, key `mypage prices` |
+| mypage prices | `/3/movie/603/watch/providers`, sent with `Accept-Encoding: gzip` (+ `decompressGzip`), see F3 | ttl 60, key `mypage prices` |
 | mypage top sellers | `/3/trending/movie/week` | ttl 60, key `mypage top-sellers` |
 
 ---
@@ -219,6 +219,55 @@ fetches with *fresh* `Date`s still missed. The function can't see or strip upstr
 on the Set-Cookie/private hypothesis, which failed. Options: send `Accept-Encoding: gzip` explicitly on
 ingredient fetches (cheap to try, and would also reveal whether encoding is the lever), or swap prices
 for a backend that doesn't sit behind a long-lived shared cache.
+
+### F4. Recheck on dev, 2026-09-29 18:06–18:09 UTC (package 3): stock fixed; mypage evidence contradicts F3
+
+**Deploy propagation.** The debug host served the new package from 18:06:30, but the public host still
+reached the *old* code until at least 18:07:07 (old-style `404 "No stock with id 1"`); by 18:07:21 it had
+the new code. Wait for the public host, not just the debug host, before running a proof.
+
+**stock (`id=2`) — the card works.** The reading is held while cached, stale-while-revalidate serves the
+old reading instantly, and the next request carries the refreshed one:
+
+| t | UTC | x-cache | age | level | readingAt | curl total |
+|---|---|---|---|---|---|---|
+| +0 s | 18:07:57 | MISS | 0 | 359 | 18:07:59 | 1.50 s |
+| +13 s | 18:08:10 | HIT | 11 | 359 | 18:07:59 | 0.19 s |
+| +26 s | 18:08:23 | HIT | **24** (stale: past max-age 20) | 359 | 18:07:59 | 0.18 s |
+| +40 s | 18:08:37 | HIT | 14 | **415** | **18:08:23** (the refresh triggered at +26 s) | 0.70 s |
+
+**mypage ×5 with temporary instrumentation** (each ingredient's upstream `Age`, `Date`, `x-cache`; removed
+before commit). Prices sent `Accept-Encoding: gzip`:
+
+| visitor | ingredient | upstream `x-cache` | upstream `Age` | `Date` / fetchedAt | ms |
+|---|---|---|---|---|---|
+| 1 gold | product | `Hit from cloudfront, HIT` | 1287 | 18:07:22 | 97 |
+| | prices | `Hit from cloudfront, **MISS**` | 463 | **17:59:40** | 98 |
+| | topSellers | `Hit from cloudfront, HIT` | 481 | 18:07:22 | 98 |
+| 2 silver | all three | `Hit from cloudfront, HIT` | 1287 / 463 / 481 | 18:07:22 | 227–228 |
+| 3 bronze | all three | `…, HIT` | 1288 / 464 / 482 | 18:07:23 | 232–236 |
+| 4 gold | all three | `…, HIT` | 1288 / 464 / 482 | 18:07:23 | 44–45 |
+| 5 silver | all three | `…, HIT` | 1288 / 464 / 482 | 18:07:23 | 21–25 |
+
+What this shows:
+- **The gzip header reached TMDB.** Prices landed on CloudFront's gzip copy (`Date 17:59:40`, `Age 463`),
+  not the identity copy (`Date 13:28:02`, `Age ~16,000`). The prices ingredient was kept, not swapped.
+- **All three ingredients were served from Fastly's cache for visitors 2–5.** The second token in
+  `x-cache` (after CloudFront's) is Fastly's own: `HIT` for every ingredient after prices' single `MISS`.
+  Each ingredient's upstream `Age` advances in step with the clock (463 → 464), so the same stored copies
+  were served to all five visitors. In that sense all three ingredients are shared.
+- **`Date`/`fetchedAt` is not a usable "same timestamp" signal.** On these hits `Date` moved with the
+  clock (18:07:22 → 18:07:23) while `Age` showed the same object. Something in front rewrites `Date` on
+  delivery, so p9d's "prices re-fetched every time, new `Date` each time" was probably a misreading.
+- **Contradicts F3's mechanism.** Fastly served `HIT` for objects with upstream `Age` 464–1288 under a 60 s
+  TTL, so "Fastly counts upstream `Age` against our ttl" is not what happens here. **Also unexplained:** a
+  product object first stored around 17:45 was still a `HIT` at 18:07, 21 minutes into a 60 s TTL. These
+  hits may come from another cache layer (e.g. a shield) governed by TMDB's `max-age` rather than our
+  override. Not verified.
+- **`X-Backend-Calls` was wrong here.** It said 3 on all five visitors, but only one fetch (visitor 1,
+  prices) was a Fastly `MISS`. These hits took 21–236 ms (a remote cache node, not the local one), so the
+  ≥ 15 ms heuristic counted them as backend calls. The subrequest's own `x-cache` last token (`HIT`/`MISS`)
+  looks like a far better signal; not yet adopted.
 
 ## Proof pass — dev environment (`aem-cloud-on-dentsu-dev-gradial`, e1522172), 2026-09-29
 

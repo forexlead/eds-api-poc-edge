@@ -86,10 +86,13 @@ function backendCounter() {
  * the fetch cache answered — inferred from its duration (LEFT_FUNCTION_MS). A fetch that
  * failed before reaching TMDB isn't counted.
  */
-async function fetchTmdb(path, surrogateKey, policy, counter) {
+async function fetchTmdb(path, surrogateKey, policy, counter, { gzip = false } = {}) {
+  const headers = { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' };
+  if (gzip) headers['Accept-Encoding'] = 'gzip';
   const result = await timedFetch(`${TMDB_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${TMDB_TOKEN}`, Accept: 'application/json' },
-    cacheOverride: fetchCacheOverride(false, surrogateKey, policy)
+    headers,
+    cacheOverride: fetchCacheOverride(false, surrogateKey, policy),
+    ...(gzip ? { fastly: { decompressGzip: true } } : {})
   });
   const left = result.ok && result.ms >= LEFT_FUNCTION_MS;
   if (left) counter.add();
@@ -257,7 +260,7 @@ async function mypageHandler(req) {
   const id = MYPAGE_PRODUCT_ID;
   const [product, prices, topSellers] = await Promise.all([
     fetchTmdb(`/movie/${id}?append_to_response=keywords`, `mypage product-${id}`, MYPAGE_INGREDIENT_CACHE, counter),
-    fetchTmdb(`/movie/${id}/watch/providers`, 'mypage prices', MYPAGE_INGREDIENT_CACHE, counter),
+    fetchTmdb(`/movie/${id}/watch/providers`, 'mypage prices', MYPAGE_INGREDIENT_CACHE, counter, { gzip: true }),
     fetchTmdb('/trending/movie/week', 'mypage top-sellers', MYPAGE_INGREDIENT_CACHE, counter)
   ]).then((results) =>
     Promise.all([

@@ -167,6 +167,10 @@ describe('Cache Lab /api/cache/*', function () {
         assert.equal(opts.cacheOverride.ttl, 60);
         assert.equal(opts.cacheOverride.swr, undefined);
       }
+      // prices asks for gzip: TMDB's CloudFront keeps a separate, much older copy for identity
+      const prices = calls.find((c) => c.url.endsWith('/watch/providers'));
+      assert.equal(prices.opts.headers['Accept-Encoding'], 'gzip');
+      assert.equal(prices.opts.fastly.decompressGzip, true);
 
       const body = await resp.json();
       assert.equal(body.tier, 'gold');
